@@ -1,0 +1,2 @@
+# requirements.txt（必須）
+pillow>=10.0.0
