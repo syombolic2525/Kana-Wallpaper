@@ -65,7 +65,9 @@
 
 インストール例：
 ```bash
-pip install pillow numpy opencv-python
+pip install -r requirements.txt
+# 任意機能も使うなら
+pip install -r requirements-optional.txt
 ```
 
 ---
