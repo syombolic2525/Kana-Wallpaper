@@ -1,0 +1,3 @@
+# requirements-optional.txt（任意）
+numpy>=1.23.0
+opencv-python>=4.8.0
