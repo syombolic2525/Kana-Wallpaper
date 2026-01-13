@@ -7,7 +7,7 @@ Kana Wallpaper - Unified FINAL
 実行方法
 --------
 - ダブルクリック：既定フォルダ群（サブフォルダ含む）を走査
-- ドラッグ&ドロップ / CLI：複数フォルダを引数で渡せます（サブフォルダ含む）
+- ドラッグ&ドロップ／CLI：複数フォルダを引数で渡せます（サブフォルダ含む）
   例) py -3 kana_wallpaper_unified_final.py "D:\Pictures" "E:\Photos"
 - 保存・ログ関係オプション（任意）
   --img-dir <dir>       出力画像の保存先
@@ -23,22 +23,22 @@ Kana Wallpaper - Unified FINAL
 """
 
 # ============================================================
-# 目次 / Sections（整理整頓パス v30）
-#   - 依存関係（import / optional imports）
+# 目次
+#   - 依存関係（インポート／任意）
 #   - 小物ユーティリティ（安全な互換・フォールバック）
-#   - キャッシュ（dHash / タイル / 顔検出など）
-#   - レイアウト（grid / mosaic / hex）
-#   - 色順・最適化（spectral / hilbert / annealing）
+#   - キャッシュ（dHash／タイル／顔検出など）
+#   - レイアウト（grid／mosaic／hex）
+#   - 色順・最適化（spectral／hilbert／annealing）
 #   - レンダリング（貼り込み・マスク・効果・保存）
-#   - エントリーポイント（main）
+#   - エントリーポイント（メイン）
 # ============================================================
 # 設定インデックス（ざっくり早見表）
 #
-# ランチャーがセットするキーと同名のものが多いです（env / 直書き両対応）。
+# ランチャーがセットするキーと同名のものが多いです（環境変数／直書き両対応）。
 # 迷子になったら「この表 → 章見出し → 変数名検索」の順で辿るのが早いです。
 #
 # ■ 入力・収集
-#   - IMG_DIRS / INPUT_DIRS        : 画像探索フォルダ（サブフォルダ含む）
+#   - IMG_DIRS／INPUT_DIRS        : 画像探索フォルダ（サブフォルダ含む）
 #   - ZIP_SCAN_ENABLE              : ZIP内画像を候補に含める（on/off）
 #
 # ■ 抽出（SELECT_MODE）と重複近似排除
@@ -49,24 +49,24 @@ Kana Wallpaper - Unified FINAL
 #
 # ■ レイアウト
 #   - LAYOUT_STYLE                 : grid / hex / mosaic-uniform-height / mosaic-uniform-width / random
-#   - ROWS / COLS                  : grid系（タイル枚数の目安）
+#   - ROWS／COLS                  : grid系（タイル枚数の目安）
 #   - HEX_TIGHT_ORIENT             : hexの詰め方（row-shift/col-shift）
 #
 # ■ 配置（色順）/ ポスト処理（mosaic系）
-#   - ORDER_MODE / GLOBAL_ORDER    : avgLAB / spectral-hilbert など（色順の作り方）
-#   - MOSAIC_POST                  : diagonal / hilbert / scatter（mosaicの“見せ方”）
+#   - ORDER_MODE／GLOBAL_ORDER    : avgLAB／spectral-hilbert など（色順の作り方）
+#   - MOSAIC_POST                  : diagonal／hilbert／scatter（mosaicの“見せ方”）
 #   - MOSAIC_DIAG_DIR              : diagonalの向き（tl_br など）
 #
-# ■ 最適化（焼きなまし / 近傍k）
+# ■ 最適化（焼きなまし／近傍k）
 #   - *_LOCAL_OPT_ENABLE           : 近傍最適化を有効にするか（mosaic/hex/grid など）
 #   - *_LOCAL_OPT_STEPS            : 試行回数（大きいほど重いが改善しやすい）
 #   - *_LOCAL_OPT_REHEATS          : 再加熱（局所解脱出。増やすと重い）
 #   - *_LOCAL_OPT_K                : 近傍候補数（大きいほど探索が広い）
-#   - *_ANNEAL_T0 / *_ANNEAL_TEND  : 温度（探索の荒さ→締め）
+#   - *_ANNEAL_T0／*_ANNEAL_TEND  : 温度（探索の荒さ→締め）
 #
 # ■ デバッグ（必要なときだけ）
 #   - EXC_PASS_DEBUG               : “握りつぶし例外”を警告表示（デフォFalse）
-#   - _FDBG / _FDBG2               : Face-focus / 目検証の統計（ログで出る）
+#   - _FDBG／_FDBG2               : Face-focus／目検証の統計（ログで出る）
 # ============================================================
 
 # ============================================================
@@ -76,7 +76,7 @@ from __future__ import annotations
 import sys, os, math, time, random, tempfile, csv, json, secrets, textwrap, threading, atexit
 import hashlib
 import io, zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from typing import List, Tuple, Optional, Sequence, Union, Any, Dict
 ImageRef = Union[Path, str]
@@ -151,6 +151,182 @@ except NameError:
 
 _EXC_PASS_WARNED = set()
 
+
+# --- CPU描画の先読みヘルパ ---
+def prefetch_ordered_safe(items, fn, ahead: int = 16, max_workers: int = 0):
+    """thread pool で fn(item) を実行し、最大 `ahead` 件までタスクを同時実行して先読みします。
+    
+    元の順序のまま (item, result, exc) を yield します。
+    exc が None でない場合は result は None になり、呼び出し側は同期パスにフォールバックできます。"""
+    try:
+        ahead = int(ahead)
+    except Exception:
+        ahead = 0
+    if ahead <= 0:
+        for item in items:
+            try:
+                yield item, fn(item), None
+            except Exception as e:
+                yield item, None, e
+        return
+
+    try:
+        mw = int(max_workers)
+    except Exception:
+        mw = 0
+    if mw <= 0:
+        try:
+            mw = max(1, int(os.cpu_count() or 4))
+        except Exception:
+            mw = 4
+
+    from collections import deque
+    it = iter(items)
+    q = deque()
+    with ThreadPoolExecutor(max_workers=mw) as ex:
+        for _ in range(ahead):
+            try:
+                item = next(it)
+            except StopIteration:
+                break
+            q.append((item, ex.submit(fn, item)))
+
+        while q:
+            item, fut = q.popleft()
+            try:
+                res = fut.result()
+                yield item, res, None
+            except Exception as e:
+                yield item, None, e
+            try:
+                item2 = next(it)
+            except StopIteration:
+                item2 = None
+            if item2 is not None:
+                q.append((item2, ex.submit(fn, item2)))
+
+
+
+def prefetch_ordered_mp_safe(items, fn, ahead: int = 16, max_workers: int = 0):
+    """process pool で fn(item) を実行し、最大 `ahead` 件までタスクを同時実行して先読みします。
+    
+    元の順序のまま (item, result, exc) を yield します。
+    exc が None でない場合は result は None になり、呼び出し側は同期パスにフォールバックできます。
+    
+    注意:
+      - `fn` は pickle 可能（トップレベル関数）である必要があります。
+      - Windows ではワーカー生成時に本モジュールが import されるため、import 時に重い処理をしないでください。"""
+    try:
+        ahead = int(ahead)
+    except Exception:
+        ahead = 0
+    if ahead <= 0:
+        for item in items:
+            try:
+                yield item, fn(item), None
+            except Exception as e:
+                yield item, None, e
+        return
+
+    try:
+        mw = int(max_workers)
+    except Exception:
+        mw = 0
+    if mw <= 0:
+        try:
+            mw = max(1, int(os.cpu_count() or 4))
+        except Exception:
+            mw = 4
+
+    from collections import deque
+    it = iter(items)
+    q = deque()
+    with ProcessPoolExecutor(max_workers=mw) as ex:
+        for _ in range(ahead):
+            try:
+                item = next(it)
+            except StopIteration:
+                break
+            q.append((item, ex.submit(fn, item)))
+
+        while q:
+            item, fut = q.popleft()
+            try:
+                res = fut.result()
+                yield item, res, None
+            except Exception as e:
+                yield item, None, e
+            try:
+                item2 = next(it)
+            except StopIteration:
+                item2 = None
+            if item2 is not None:
+                q.append((item2, ex.submit(fn, item2)))
+
+
+def _pf_worker_grid_render(arg):
+    """grid タイル描画用のプロセス安全なワーカー。
+
+    引数: (path, w, h, mode, grid_use_face_focus)
+    戻り値: (kind, PIL.Image)
+    """
+    p, w, h, mode, grid_use_ff = arg
+    w = max(1, int(w))
+    h = max(1, int(h))
+
+    if bool(grid_use_ff):
+        tile = _tile_render_cached(p, w, h, 'fill', use_face_focus=True)
+        return 'fill_ff', tile
+
+    if str(mode) == 'fit':
+        tile = _tile_render_cached(p, w, h, 'fit', use_face_focus=False)
+        return 'fit', tile
+
+    tile = _tile_render_cached(p, w, h, 'fill', use_face_focus=False)
+    return 'fill', tile
+
+
+
+def _pf_worker_hex_render(item):
+    """hex タイル描画用のプロセス安全なワーカー。
+    
+    item: (path, S)
+    returns: (key, PIL.Image または None)"""
+    p_t, S_t = item
+    try:
+        S_t = max(1, int(S_t))
+        with open_image_safe(p_t, draft_to=(S_t, S_t), force_mode='RGB') as im_t:
+            tile_t = _cover_square_face_focus(im_t, S_t, p_t)
+        return str(p_t), tile_t
+    except Exception:
+        return str(p_t), None
+
+def _pf_worker_mosaic_uh_render(item):
+    """mosaic-uniform-height タイル描画用のプロセス安全なワーカー。
+
+    入力: (path, w, h)
+    戻り値: PIL.Image
+    """
+    p_t, wj_t, rhh = item
+    wj_t = max(1, int(wj_t))
+    rhh = max(1, int(rhh))
+    with open_image_safe(p_t, draft_to=(wj_t, rhh), force_mode='RGB') as im_tt:
+        return hq_resize(im_tt, (wj_t, rhh))
+
+
+def _pf_worker_mosaic_uw_render(item):
+    """mosaic-uniform-width タイル描画用のプロセス安全なワーカー。
+
+    入力: (path, w, h)
+    戻り値: PIL.Image
+    """
+    p_t, wj_t, h_t = item
+    wj_t = max(1, int(wj_t))
+    h_t = max(1, int(h_t))
+    with open_image_safe(p_t, draft_to=(wj_t, h_t), force_mode='RGB') as im_tt:
+        return hq_resize(im_tt, (wj_t, h_t))
+# --- /CPU描画の先読みヘルパ ---
+
 def _warn_exc_once(e: BaseException) -> None:
     """except Exception: pass された例外を、必要なときだけ 1 回だけ表示する。"""
     if not bool(globals().get("EXC_PASS_DEBUG", False)):
@@ -177,10 +353,12 @@ def _warn_exc_once(e: BaseException) -> None:
 #   複数指定OK。サブフォルダも含めて走査します。
 # ---------------------------------------------------------------
 # 既定の入力フォルダ（ダブルクリック時に走査）
-# - 環境に合わせて変更してください（ドラッグ＆ドロップ指定も可能）
+# - 既定は ./images（リポジトリ内に images フォルダを置く想定）
+# - 存在しない場合はドラッグ＆ドロップ／CLI でフォルダを渡してください
 DEFAULT_TARGET_DIRS = [
-    r".\images",
+    r"./images",
 ]
+
 
 # ---------------------------------------------------------------
 # 保存とログ（どこに何を残すか）
@@ -214,19 +392,19 @@ FORMAT        = "png"              # "png" か "jpg"
 BG_COLOR      = "#000000"          # 背景色（FIT時の余白やモザイクの隙間に見える色）
 
 # レイアウトスタイルを指定します。
-# - "mosaic-uniform-height" : 行の高さを一定にして横方向に詰めるモザイク
-# - "mosaic-uniform-width"  : 列の幅を一定にして縦方向に詰めるモザイク
 # - "grid"                  : 固定グリッド（ROWS×COLS）に均等配置
 # - "hex"                   : 正六角・フラットトップ ハニカム充填
+# - "mosaic-uniform-height" : 行の高さを一定にして横方向に詰めるモザイク
+# - "mosaic-uniform-width"  : 列の幅を一定にして縦方向に詰めるモザイク
 # - "random"                : 上記候補からランダムに選択
 LAYOUT_STYLE = "random"
 
 # random の候補に含めるレイアウト（必要に応じて編集）
 RANDOM_LAYOUT_CANDIDATES = [
-    "mosaic-uniform-height",
-    "mosaic-uniform-width",
     "grid",
     "hex",
+    "mosaic-uniform-height",
+    "mosaic-uniform-width",
 ]
 
 # Grid レイアウト用の行数と列数（目安）。ROWS×COLS 枚を上限として使用します。
@@ -343,7 +521,7 @@ except NameError: VIGNETTE_ROUND = 0.90
 #   - "manual" : MANUAL_* をそのまま適用
 #   - "off"    : 無調整
 # ---------------------------------------------------------------
-BRIGHTNESS_MODE  = "off"          # "off" / "auto" / "manual"
+BRIGHTNESS_MODE  = "auto"          # "off" / "auto" / "manual"
 AUTO_METHOD      = "hybrid"        # "gamma" / "gain" / "hybrid"
 AUTO_TARGET_MEAN = 0.50            # 0.0〜1.0（目標の平均明るさ）
 AUTO_GAIN_MIN,  AUTO_GAIN_MAX  = 0.75, 1.35
@@ -394,7 +572,7 @@ def _effective_seed(seed_value, bits: int = 128) -> int:
     """
     seed_value を int に正規化して返します。
 
-        - None / "random" / 変換不能: secrets.randbits(bits) で新しい seed を生成します
+        - None／"random"／変換不能: secrets.randbits(bits) で新しい seed を生成します
         - int に変換できる: その値を採用します
     """
     try:
@@ -508,7 +686,7 @@ FACE_FOCUS_ZOOM_MIN = 0.50          # ← さらに“引き”余地を作り�
 # ---------------------------------------------------------------
 # Mosaic の最適化（行/列の “詰まり具合” と “並びの色差”）
 #   - バランス最適化: 行幅/列高の偏りを下げる（溢れ・バラつき抑制）
-#   - 並び色差      : 各行/列の順番を最適化（swap / 2opt）
+#   - 並び色差      : 各行/列の順番を最適化（swap／2opt）
 #   - グローバル順序: 詰める前に全体の順序を整える（色の並びを先に決める）
 # ---------------------------------------------------------------
 MOSAIC_BALANCE_ENABLE = True       # 行/列のバランス最適化を有効にする
@@ -518,7 +696,7 @@ MOSAIC_NEIGHBOR_OBJECTIVE = "min"
 MOSAIC_NEIGHBOR_ITERS_PER_LINE = 200
 
 # 行/列の並び最適化アルゴリズム
-#   "swap" / "2opt" / "swap+2opt"（粗→微の二段構え推奨）
+#   "swap"／"2opt"／"swap+2opt"（粗→微の二段構え推奨）
 MOSAIC_SEQ_ALGO = "swap+2opt"
 
 # バランス最適化の挙動
@@ -526,14 +704,14 @@ BALANCE_EARLY_STOP       = True    # 改善停滞で早期終了
 BALANCE_RESTART_ON_STALL = True    # 一度だけランダム再スタート
 
 # 詰める前の “全体の並び” を決める（mosaic 系の前処理）
-#   "none" / "spectral-hilbert" / "anneal"（フェイスフォーカス時の並び替えモード）
+#   "none"／"spectral-hilbert"／"anneal"（フェイスフォーカス時の並び替えモード）
 MOSAIC_GLOBAL_ORDER      = "spectral-hilbert"
 MOSAIC_GLOBAL_OBJECTIVE  = "min"   # "max" or "min"
 MOSAIC_GLOBAL_ITERS      = 40000   # anneal 時の反復量の目安
 
 # モザイクの拡張割り当て（post-pack）
 #  - 有効時は先にレイアウトの幾何を決め、その後タイルへ画像を割り当てる
-#      タイル位置順（diagonal / Hilbert / checkerboard風）で割り当て、必要なら
+#      タイル位置順（diagonal／Hilbert／checkerboard風）で割り当て、必要なら
 #      ローカルk近傍アニールで微調整する。
 MOSAIC_ENHANCE_ENABLE     = True   # True: post-pack割り当て（拡張）＋（任意）ローカル最適化を有効化
 MOSAIC_ENHANCE_PROFILE    = "diagonal"  # "diagonal" / "hilbert" / "scatter"（旧: "checker"） ※ "off" は旧互換
@@ -548,7 +726,7 @@ MOSAIC_POS_HILBERT_ORDER  = 10      # 位置ヒルベルトの次数（10 → 10
 
 # ------------------------------------------------------------------------
 # モザイクレイアウトのギャップレス拡張フラグ
-# True にすると、uniform-height / uniform-width のモザイクで行や列を追加画像で拡張し、
+# True にすると、uniform-height／uniform-width のモザイクで行や列を追加画像で拡張し、
 # 右・下・左・上の各辺に余白が残らないようにします。
 # 拡張後のモザイクは余剰部分を左右均等に切り取って中央に揃えます。
 # これにより残った隙間が解消され、hex レイアウトと同様の挙動になります。
@@ -563,7 +741,7 @@ except NameError:
     MOSAIC_GAPLESS_EXTEND = True
 
 # ------------------------------------------------------------------------
-# 自動補間 / 隙間検出フラグ
+# 自動補間／隙間検出フラグ
 # True にすると、モザイク描画の最後に生成されたマスクを検査して、
 # ギャップレス拡張後にも残る細い隙間（縦または横の筋）を検出・修正します。
 # 検出は表示範囲内（margin〜margin+W または H）で完全に空白の行や列を探し、
@@ -611,7 +789,7 @@ MOSAIC_UW_COL_ORDER = "avgLAB"
 MOSAIC_UH_ASSIGN = MOSAIC_UW_ASSIGN
 
 # Mosaic Uniform Height の行順。Uniform Width の MOSAIC_UW_COL_ORDER と対称。
-# - 選択肢: "first-rank" / "avg-rank" / "avgLAB" / "none"
+# - 選択肢: "first-rank"／"avg-rank"／"avgLAB"／"none"
 # None の場合は、旧設定 MOSAIC_UH_ORDER_ROWS に従って自動決定します。
 MOSAIC_UH_ROW_ORDER = None
 
@@ -666,7 +844,7 @@ except NameError: HEX_TIGHT_EXTEND = 2  # 画面外へ何層分タイルを拡�
 # hex でも grid/mosaic のように「色の並び最適化」を効かせるための設定。
 #   HEX_GLOBAL_ORDER（全体の並び）:
 #     - "inherit" : MOSAIC_GLOBAL_ORDER を流用
-#     - 選択肢: "none" / "spectral-hilbert" / "anneal"
+#     - 選択肢: "none"／"spectral-hilbert"／"anneal"
 #   HEX_GLOBAL_OBJECTIVE（目的関数）:
 #     - "min" : 近い色を近く（グラデ向き）
 #     - "max" : 近い色を離す（散らし向き）
@@ -786,7 +964,7 @@ except NameError: FACE_FOCUS_FACE_RATIO_MAX = 2.0
 RECURSIVE   = True
 IMAGE_EXTS  = {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff",".jfif"}
 
-# Zip 圧縮ファイル内の画像も候補に含める（.zip / .cbz）
+# Zip 圧縮ファイル内の画像も候補に含める（.zip／.cbz）
 #   - True にするとスキャン時に Zip を開いて中の画像を列挙します（候補数が増えます）。
 #   - Zip が多い/巨大だとスキャンが遅くなるので、必要なときだけ ON 推奨です。
 try:
@@ -837,7 +1015,7 @@ SELECT_MODE = "random"
 # ---------------------------------------------------------------------------
 # 近似重複の除去設定
 SHOW_RANDOM_DEDUP_PROGRESS = False  # 近似重複除去の走査バー表示（分母が大きく分かりづらいので既定OFF）
-#   pick_recent() / pick_sorted_generic() は、True の場合 dHash による近似重複除去を行います。
+#   pick_recent()／pick_sorted_generic() は、True の場合 dHash による近似重複除去を行います。
 #   重複を厳しく除去すると、似た構図の新しい画像が多い場合に大幅に間引かれてしまい、
 #   代わりに古い画像が大量に補充されることがあります。通常は False を推奨します。
 #   必要に応じて値を変更してください。
@@ -853,7 +1031,7 @@ try: SPREAD_RANDOM_WHEN_TOPPED_UP
 except NameError: SPREAD_RANDOM_WHEN_TOPPED_UP = True
 
 # 重複近似排除（dHash の Hamming 距離しきい値）。値を大きくすると「近い画像」まで重複扱いになり、除去が強くなります。
-DEDUPE_HAMMING = 15  # 近似重複排除：dHashの許容Hamming距離（大きいほど緩い）
+DEDUPE_HAMMING = 15  # 近似重複排除：dHashの許容Hamming距離（大きいほど厳しい）
 
 # しきい値の一貫性確保
 try:
@@ -888,6 +1066,58 @@ try: DHASH_PREFETCH_WORKERS
 except NameError: DHASH_PREFETCH_WORKERS = max(1, min(8, (os.cpu_count() or 4)))  # スレッド数
 try: DHASH_PREFETCH_AHEAD
 except NameError: DHASH_PREFETCH_AHEAD = 0       # 先読み対象の枚数（0=自動。大きすぎると無駄が増えます）
+
+
+# 描画プリフェッチ（レンダリング高速化／CPU）
+#   大量タイルの「開く→リサイズ→（face-focus等）→貼る」のうち、
+#   “開く/リサイズ”を先読みして、貼り付けループの待ち時間を減らします。
+#
+#   DRAW_PREFETCH_ENABLE  : True/False（全体ON/OFF）
+#   DRAW_PREFETCH_AHEAD   : 先読み数。0 にするとプリフェッチ無効（既定 16）
+#   DRAW_PREFETCH_WORKERS : 0 なら自動（CPUコア数）。固定したい場合は 4〜(コア数) を指定。
+#     ※ 値を上げすぎるとディスクI/O・メモリ消費が増えます。
+#        伸びが頭打ちになったら workers を下げるのが吉です。
+# ---------------------------------------------------------------
+try:
+    if isinstance(DRAW_PREFETCH_ENABLE, str):
+        DRAW_PREFETCH_ENABLE = DRAW_PREFETCH_ENABLE.strip().lower() not in ("0", "false", "off", "no")
+except NameError:
+    DRAW_PREFETCH_ENABLE = True
+
+try:
+    DRAW_PREFETCH_AHEAD = int(DRAW_PREFETCH_AHEAD)
+except NameError:
+    DRAW_PREFETCH_AHEAD = 16
+except Exception:
+    DRAW_PREFETCH_AHEAD = 16
+
+try:
+    DRAW_PREFETCH_WORKERS = int(DRAW_PREFETCH_WORKERS)
+except NameError:
+    DRAW_PREFETCH_WORKERS = 0
+except Exception:
+    DRAW_PREFETCH_WORKERS = 0
+
+
+
+# ---------------------------------------------------------------
+# Hex: タイル生成メモリキャッシュ（高速化／安定化）
+#   Hex レイアウト描画では、同じ画像を何度も参照することがあります。
+#   ProcessPool で「ユニーク画像のタイル生成」を先に作ってキャッシュしておくと draw が爆速になります。
+#   ただしキャッシュ上限が小さいと、ユニーク数が上限を超えた瞬間にキャッシュが溢れて
+#   “残りが1プロセス逐次生成”に落ちて急激に遅くなることがあります。
+#
+#   HEX_TILE_MEMCACHE_MAX : Hex 用タイルキャッシュの最大保持数（既定 512）
+#     - 0 で無効（メモリ節約だが遅くなりやすい）
+#     - 500枚以上など大量タイルで遅くなる場合は 1024〜4096 を目安に増やしてください。
+# ---------------------------------------------------------------
+try:
+    HEX_TILE_MEMCACHE_MAX = int(HEX_TILE_MEMCACHE_MAX)
+except NameError:
+    HEX_TILE_MEMCACHE_MAX = 4096
+#  0: 無制限（追い出しなし）／-1: 無効（キャッシュを使わない）
+except Exception:
+    HEX_TILE_MEMCACHE_MAX = 512
 
 # ---------------------------------------------------------------
 # 表示（進捗・コンソールUI）
@@ -1030,7 +1260,7 @@ def pad_to_width(s: str, w: int, align: str = "left") -> str:
     - ANSI エスケープシーケンス（\x1b[...m）は幅 0 として扱います。
     - 結合文字（濁点など）は幅 0 として扱います。
 
-    NOTE: `str.ljust()` は全角を 1 文字扱いするため、日本語を含むと枠線（| / │）がずれます。
+    NOTE: `str.ljust()` は全角を 1 文字扱いするため、日本語を含むと枠線（|／│）がずれます。
           その対策としてこの関数を使います。
     """
     try:
@@ -1184,6 +1414,25 @@ def _ensure_newline_if_bar_active():
         _BAR_ACTIVE = False
 
 def bar(done: int, total: int, prefix: str="", final: bool=False):
+    # 表示ラベルの軽い正規化（見た目の紛らわしさ対策）
+    # Feature extraction で 'select' が連続して出ることがあるため、工程名に置き換える
+    #   aesthetic -> （リセット）
+    #   select(1回目) -> rank
+    #   select(2回目) -> dedup
+    try:
+        _p = (prefix or "").strip().lower()
+        if _p == "aesthetic":
+            globals()["_BAR_SELECT_STAGE"] = 0
+        if _p == "select":
+            st = int(globals().get("_BAR_SELECT_STAGE", 0) or 0)
+            if st <= 0:
+                prefix = "rank    "
+            else:
+                prefix = "dedup   "
+            globals()["_BAR_SELECT_STAGE"] = st + 1
+    except Exception:
+        pass
+
     # 進捗更新方式の分岐（秒間隔 or ステップ間隔）
     mode = str(globals().get('PROGRESS_UPDATE_MODE', 'secs')).lower()
     if mode == 'every':
@@ -1280,7 +1529,7 @@ def _note_opt_improve_sumdelta(init_sum: float, best_sum: float, objective: str,
       init -> best (Δ=..., ...%) / accepted a/b
     を出します。
 
-    - objective は "min" / "max"（表示の % は「改善量」を正にするため objective を考慮）
+    - objective は "min"／"max"（表示の % は「改善量」を正にするため objective を考慮）
       - min（似せる）: best < init が改善 → Δ は負、% は正
       - max（散らす）: best > init が改善 → Δ は正、% は正
 
@@ -1309,7 +1558,7 @@ def init_console():
     UI["ansi"]  = ANSI_OK and (UI["style"]=="unicode")
 
 _TR_MAP = {
-    # ===== バナー / フェーズ =====
+    # ===== バナー／フェーズ =====
     "スキャン完了": "Scan complete",
     "描画中: Grid": "Rendering (Grid)",
     "描画中: Mosaic / Uniform Height": "Rendering (Mosaic - Uniform Height)",
@@ -1354,7 +1603,7 @@ _TR_MAP = {
     "描画Done":         "Render done",
     "壁紙を更新しました": "Wallpaper updated",
 
-    # ===== 補足 / ラベル =====
+    # ===== 補足／ラベル =====
     "候補": "Candidates",
     "保存": "Saved",
     "選抜": "Picked",
@@ -1545,7 +1794,7 @@ def rainbow_text(s: str, bold: bool=True, palette: list[tuple[int,int,int]]|None
     return "".join(out)
 
 def neon_bar(fill_len: int, empty_len: int, palette: list[tuple[int,int,int]]|None=None) -> str:
-    # ASCII / Bling 無効時は地味な進捗バー
+    # ASCII／Bling 無効時は地味な進捗バー
     if globals().get("UI_STYLE","ascii") != "unicode" or not globals().get("UNICODE_BLING", False):
         return BAR_FILL_CHAR*fill_len + BAR_EMPTY_CHAR*empty_len
     # 使用するパレットを決定
@@ -1814,10 +2063,10 @@ def _imgref_display(p: ImageRef) -> str:
         return s
 
 # ---------------------------------------------------------------------------
-# 画像読み込みの安全ガード（巨大画像 / ZIP爆弾 対策）
+# 画像読み込みの安全ガード（巨大画像／ZIP爆弾 対策）
 #   - MAX_IMAGE_PIXELS_LIMIT: 画像の最大ピクセル数（これを超える画像はスキップ）
 #   - ZIP_MEMBER_MAX_BYTES  : ZIP内メンバーの展開後サイズ上限（bytes）
-#   - ZIP_MEMBER_MAX_RATIO  : ZIPの展開比上限（file_size / compress_size）
+#   - ZIP_MEMBER_MAX_RATIO  : ZIPの展開比上限（file_size／compress_size）
 # ---------------------------------------------------------------------------
 try: MAX_IMAGE_PIXELS_LIMIT
 except NameError: MAX_IMAGE_PIXELS_LIMIT = 200_000_000  # 200MP（4K/8Kは余裕、異常に巨大な画像を避ける）
@@ -1826,20 +2075,35 @@ except NameError: ZIP_MEMBER_MAX_BYTES = 256 * 1024 * 1024  # 256MB（展開後�
 try: ZIP_MEMBER_MAX_RATIO
 except NameError: ZIP_MEMBER_MAX_RATIO = 300  # 展開比が異常に高いもの（ZIP爆弾対策）
 
-def open_image_safe(p: ImageRef) -> Image.Image:
+def open_image_safe(p: ImageRef, draft_to: Optional[Tuple[int,int]] = None, force_mode: Optional[str] = None) -> Image.Image:
     """Path または zip:// キーから PIL.Image を安全に開く。
 
     安全のために以下を行います：
     - 元の Image.open() 由来オブジェクト（ファイルハンドル）を必ず close
     - exif_transpose/convert で別オブジェクトになっても、load()+copy() で完全に分離
-    - 巨大画像（MAX_IMAGE_PIXELS_LIMIT）や ZIP 爆弾疑い（ZIP_MEMBER_MAX_BYTES / ZIP_MEMBER_MAX_RATIO）はスキップ
+    - 巨大画像（MAX_IMAGE_PIXELS_LIMIT）や ZIP 爆弾疑い（ZIP_MEMBER_MAX_BYTES／ZIP_MEMBER_MAX_RATIO）はスキップ
     """
     s = str(p)
 
     def _postprocess_and_detach(im0: Image.Image) -> Image.Image:
+        # JPEG などは draft で“だいたい目標サイズ”に近い解像度でデコードさせると速い
+        # ※ draft は load() 前にしか効かないので、ここ（detach 前）で適用する
+        if draft_to is not None:
+            try:
+                fmt = str(getattr(im0, "format", "")).upper()
+                if fmt in ("JPEG", "JPG"):
+                    im0.draft(force_mode or "RGB", (max(1, int(draft_to[0])), max(1, int(draft_to[1]))))
+            except Exception as e:
+                _warn_exc_once(e)
+                pass
+
         im = ImageOps.exif_transpose(im0)
-        if im.mode not in ("RGB", "RGBA"):
-            im = im.convert("RGB")
+        if force_mode:
+            if im.mode != force_mode:
+                im = im.convert(force_mode)
+        else:
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
 
         try:
             max_px = int(globals().get("MAX_IMAGE_PIXELS_LIMIT", MAX_IMAGE_PIXELS_LIMIT))
@@ -1926,26 +2190,40 @@ def paste_cell(canvas: Image.Image, mask: Image.Image, im: Image.Image,
         rez=resize_into_cell(im,w,h,"fit")
         rx=x+(w-rez.size[0])//2; ry=y+(h-rez.size[1])//2
         canvas.paste(rez,(rx,ry))
-        ImageDraw.Draw(mask).rectangle([rx,ry,rx+rez.size[0]-1,ry+rez.size[1]-1], fill=255)
+        mask.paste(255, (rx, ry, rx + rez.size[0], ry + rez.size[1]))
     else:
         rez=resize_into_cell(im,w,h,"fill")
         canvas.paste(rez,(x,y))
-        ImageDraw.Draw(mask).rectangle([x,y,x+w-1,y+h-1], fill=255)
+        mask.paste(255, (x, y, x + w, y + h))
 
 def hq_resize(img: Image.Image, size: tuple[int,int]) -> Image.Image:
-    """大幅縮小に強い高品質リサイズ：段階的に BOX → 最終 LANCZOS。"""
-    tw, th = max(1, size[0]), max(1, size[1])
+    """大幅縮小に強い高品質リサイズ（CPU）：
+    Pillow の `reducing_gap` を優先利用し、JPEG は draft/reduce による高速化も期待します。
+    古い Pillow では reducing_gap が無い場合があるため、その際は従来の段階縮小にフォールバックします。
+    """
+    tw, th = max(1, int(size[0])), max(1, int(size[1]))
     iw, ih = img.size
-    if RESAMPLE_MODE != "hq":
-        return img.resize((tw, th), Resampling.LANCZOS)
+    if iw == tw and ih == th:
+        return img
 
-    # 2倍刻みで近づける
-    cur = img
-    while iw // 2 >= tw * 1.1 and ih // 2 >= th * 1.1:
-        iw //= 2; ih //= 2
-        cur = cur.resize((max(1, iw), max(1, ih)), Image.BOX)
-    # 軽い最終調整
-    return cur.resize((tw, th), Resampling.LANCZOS)
+    # 非 HQ：速度優先（reducing_gap が使える場合は 2.0 を採用）
+    if RESAMPLE_MODE != "hq":
+        try:
+            return img.resize((tw, th), Resampling.LANCZOS, reducing_gap=2.0)
+        except TypeError:
+            return img.resize((tw, th), Resampling.LANCZOS)
+
+    # HQ：品質を保ちつつ高速化（3.0 以上は fair resampling とほぼ同等）
+    try:
+        return img.resize((tw, th), Resampling.LANCZOS, reducing_gap=3.0)
+    except TypeError:
+        # 旧 Pillow フォールバック：2倍刻みで近づける → 最終 LANCZOS
+        cur = img
+        while iw // 2 >= tw * 1.1 and ih // 2 >= th * 1.1:
+            iw //= 2
+            ih //= 2
+            cur = cur.resize((max(1, iw), max(1, ih)), Image.BOX)
+        return cur.resize((tw, th), Resampling.LANCZOS)
 
 def collect_images(paths: Sequence[ImageRef], recursive: bool=True) -> List[ImageRef]:
     out: List[ImageRef] = []
@@ -2193,7 +2471,7 @@ def hamming(a:int,b:int)->int: return (a^b).bit_count()
 # ===============================================================
 
 # =============================================================================
-# セクション: 永続キャッシュ（dHash / Aesthetic / Lab / Face など）
+# セクション: 永続キャッシュ（dHash／Aesthetic／Lab／Face など）
 # =============================================================================
 _DHASH_CACHE = {}            # { norm_abs_path: {"mtime_ns":int, "size":int, "dhash":int, "t":float}, ... }
 _DHASH_CACHE_DIRTY = False
@@ -2708,7 +2986,7 @@ def _face_cache_put(p, face, upper) -> None:
 # ---------------------------------------------------------------
 # タイル描画メモキャッシュ（メモリ上・レイアウト共通）
 #   - 同じ画像を複数回使う場合の描画を高速化する
-#       （topped-up / wrap / extend / 重複など）
+#       （topped-up／wrap／extend／重複など）
 #   - タイル描画専用で JPEG の "draft" デコードも有効化する。
 # ---------------------------------------------------------------
 from collections import OrderedDict as _KanaOrderedDict
@@ -2820,15 +3098,7 @@ def _tile_render_cached(p: Path, cw: int, ch: int, mode: str, use_face_focus: bo
         return hit
 
     # 描画
-    with open_image_safe(p) as im:
-        # JPEG：タイル描画専用で小さめにデコード（dhash/aestheticには影響しない）
-        try:
-            if str(getattr(im, "format", "")).upper() in ("JPEG", "JPG"):
-                im.draft("RGB", (max(1, int(cw)), max(1, int(ch))))
-        except Exception as e:
-            _warn_exc_once(e)
-            pass
-        rgb = im.convert("RGB")
+    with open_image_safe(p, draft_to=(max(1, int(cw)), max(1, int(ch))), force_mode="RGB") as rgb:
         if use_face_focus:
             tile = _cover_rect_face_focus(rgb, int(cw), int(ch))
         else:
@@ -2882,7 +3152,7 @@ def score_and_pick(paths: List[Path], count:int, seed:int) -> List[Path]:
                     bar(j, len(missing), prefix="aesthetic ", final=(j == len(missing)))
         else:
             try:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
+                from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
                 with ThreadPoolExecutor(max_workers=workers) as ex:
                     fut_map = {ex.submit(_aes_compute_base_score, p): (i, p) for (i, p) in missing}
                     done = 0
@@ -2915,7 +3185,7 @@ def score_and_pick(paths: List[Path], count:int, seed:int) -> List[Path]:
             continue
         feats.append({"path": p, "score": float(sc) + rnd.random() * 0.01})
         if VERBOSE:
-            bar(i, len(paths), prefix="select ", final=(i == len(paths)))
+            bar(i, len(paths), prefix="rank ", final=(i == len(paths)))
 
     feats.sort(key=lambda x: x["score"], reverse=True)
 
@@ -2934,7 +3204,7 @@ def score_and_pick(paths: List[Path], count:int, seed:int) -> List[Path]:
             if h is not None:
                 hashes.append(h)
         if VERBOSE:
-            bar(i, len(feats), prefix="select ", final=(i == len(feats)))
+            bar(i, len(feats), prefix="dedup ", final=(i == len(feats)))
 
     return [f["path"] for f in uniq[:count]]
 
@@ -2972,16 +3242,16 @@ def sort_by_select_mode(paths: list) -> list:
     # 更新日時を取得する。取得失敗時は epoch=0 で一番古い扱い
     def _key_mtime(p):
         return _imgref_mtime(p)
-    # recent / newest / mtime / modified → 降順
+    # recent／newest／mtime／modified → 降順
     if mode in ("recent", "newest", "mtime", "modified"):
         return sorted(paths, key=_key_mtime, reverse=True)
-    # oldest / older / mtime_asc → 昇順
+    # oldest／older／mtime_asc → 昇順
     if mode in ("oldest", "older", "mtime_asc"):
         return sorted(paths, key=_key_mtime)
-    # name_desc / filename_desc → 降順
+    # name_desc／filename_desc → 降順
     if mode in ("name_desc", "filename_desc"):
         return sorted(paths, key=_key_name, reverse=True)
-    # name_asc / name / filename / filename_asc → 昇順
+    # name_asc／name／filename／filename_asc → 昇順
     if mode in ("name_asc", "name", "filename", "filename_asc"):
         return sorted(paths, key=_key_name)
     # デフォルト: 並べ替え無し
@@ -3063,7 +3333,7 @@ def pick_sorted_generic(paths: list, count: int, dedupe: bool = True) -> list:
             uniq.append(p)
             if h is not None:
                 hashes.append(h)
-        if VERBOSE: bar(i, n, prefix="select ", final=(i == n))
+        if VERBOSE: bar(i, n, prefix="dedup ", final=(i == n))
         if len(uniq) >= count:
             break
     return uniq[:count]
@@ -3422,7 +3692,7 @@ def optimize_grid_neighbors_anneal(
     steps  : 総ステップ（大きいほど強い）
     T0/Tend: 温度（指数冷却）
     reheats: 再加熱回数（局所脱出用）
-    objective: "max"=バラけ / "min"=似る
+    objective: "max"=バラけ／"min"=似る
     """
     n = min(len(paths), rows * cols)
     paths = list(paths[:n])
@@ -4520,7 +4790,7 @@ def optimize_mosaic_neighbors_anneal(
             curr_sum = sumdiff_for(order)
             curr_cost = to_cost(curr_sum)
 
-    # 真値を再計算（丸めの錯覚 / 累積ドリフトを回避）
+    # 真値を再計算（丸めの錯覚／累積ドリフトを回避）
     try:
         bar(steps, steps, prefix="opt-col ", final=True)
         final_sum_true = sumdiff_for(order)
@@ -4701,6 +4971,58 @@ def _kana_hex_apply_global_and_local_opt(images, _vis_needed, orient, S, step_x,
         except Exception:
             hgo = "none"
 
+    # ---- ランチャー互換（Hexの簡易配置：diagonal/hilbert/scatter） ----
+    # ランチャー側は HEX_GLOBAL_ORDER を直接セットしない場合があります。
+    # その場合でも「対角グラデ／ヒルベルト／散らし」が効くように、ここで global order を推定します。
+    # 優先順位: HEX_ENHANCE_PROFILE(文字列) -> HEX_PROFILE/HEX_GRAD_PROFILE(文字列) -> HEX_GRAD_PROFILE/HEX_PROFILE(数値1/2/3)
+    if hgo in ("inherit", "none", "", "off"):
+        prof = ""
+        try:
+            prof = str(globals().get("HEX_ENHANCE_PROFILE", "")).lower()
+        except Exception:
+            prof = ""
+        if not prof:
+            # 旧互換: HEX_PROFILE／HEX_GRAD_PROFILE に文字列が入る場合
+            try:
+                prof = str(globals().get("HEX_PROFILE", globals().get("HEX_GRAD_PROFILE", ""))).lower()
+            except Exception:
+                prof = ""
+        if prof in ("diagonal", "diag", "spectral-diagonal"):
+            hgo = "spectral-diagonal"
+        elif prof in ("hilbert", "spectral-hilbert", "spectral"):
+            hgo = "spectral-hilbert"
+        elif prof in ("scatter", "checkerboard", "cb", "hex-checkerboard"):
+            hgo = "checkerboard"
+        else:
+            # 旧互換: 1=diagonal 2=hilbert 3=scatter
+            try:
+                _p = int(globals().get("HEX_GRAD_PROFILE", globals().get("HEX_PROFILE", 0)))
+            except Exception:
+                _p = 0
+            if _p == 1:
+                hgo = "spectral-diagonal"
+            elif _p == 2:
+                hgo = "spectral-hilbert"
+            elif _p == 3:
+                hgo = "checkerboard"
+    # Hexグラデの原因切り分け用（1回だけ表示）
+    try:
+        if not globals().get("_HEX_ORDER_DEBUG_ONCE", False):
+            note(
+                "HexDBG: "
+                + f"hgo={hgo} "
+                + f"enhance={globals().get('HEX_ENHANCE_PROFILE', None)} "
+                + f"profile={globals().get('HEX_PROFILE', None)} "
+                + f"grad_profile={globals().get('HEX_GRAD_PROFILE', None)} "
+                + f"global_order={globals().get('HEX_GLOBAL_ORDER', None)} "
+                + f"diag_dir={globals().get('HEX_DIAG_DIR', None)} "
+                + f"diag_dir2={globals().get('HEX_DIAGONAL_DIRECTION', None)} "
+                + f"full_shuffle={globals().get('ARRANGE_FULL_SHUFFLE', None)}"
+            )
+            globals()["_HEX_ORDER_DEBUG_ONCE"] = True
+    except Exception:
+        pass
+
     try:
         hobj = str(globals().get("HEX_GLOBAL_OBJECTIVE", "min")).lower()
     except Exception:
@@ -4725,53 +5047,126 @@ def _kana_hex_apply_global_and_local_opt(images, _vis_needed, orient, S, step_x,
             pass
     elif hgo in ("spectral-diagonal", "diag", "diagonal"):
         # スペクトル順 + タイル中心での対角割り当て
-        # 方向は HEX_DIAG_DIR で選択：tlbr / brtl / trbl / bltr
+        # 方向は HEX_DIAG_DIR で選択：tlbr／brtl／trbl／bltr
         try:
-            diag = str(globals().get("HEX_DIAG_DIR", "tlbr")).lower()
+            diag = str(globals().get("HEX_DIAGONAL_DIRECTION", globals().get("HEX_DIAG_DIR", "tlbr"))).lower()
+            diag = diag.replace("_", "").replace("-", "")
+            # 数値指定（1〜4）も受ける: 1 tlbr／2 brtl／3 trbl／4 bltr
+            if diag in ("1", "tlbr"):
+                diag = "tlbr"
+            elif diag in ("2", "brtl"):
+                diag = "brtl"
+            elif diag in ("3", "trbl"):
+                diag = "trbl"
+            elif diag in ("4", "bltr"):
+                diag = "bltr"
         except Exception:
             diag = "tlbr"
         try:
-            centers_d = _kana_hex_collect_visible_centers(
-                orient=orient,
-                S=S,
-                step_x=step_x,
-                step_y=step_y,
-                margin=margin,
-                width=W,
-                height=H,
-                extend=extend,
-                r_used=r_used,
-                c_used=c_used,
-            )
+            # NOTE: Hexの対角グラデを安定させるため、可視中心点を「描画ループと同じ順序」で構築します
+            # （内部関数の順序に依存すると、imagesの消費順とズレてグラデが崩れることがあります）
+            centers_d = []
+            cr_d = []  # (c, r) in draw-loop order
+            try:
+                if str(orient).lower() == "row-shift":
+                    half_shift = float(S) / 2.0
+                    min_r, max_r = -extend, int(r_used) + extend
+                    min_c, max_c = -extend, int(c_used) + extend
+                    for r in range(min_r, max_r):
+                        shift = half_shift if (r % 2 != 0) else 0.0
+                        y = float(margin) + float(int(round(r * float(step_y))))
+                        for c in range(min_c, max_c):
+                            x = float(margin) + float(int(round(shift + c * float(step_x))))
+                            if not (x + S <= 0 or y + S <= 0 or x >= width or y >= height):
+                                centers_d.append((x + float(S) / 2.0, y + float(S) / 2.0))
+                                cr_d.append((c, r))
+                else:  # col-shift
+                    half_v = float(step_y) / 2.0
+                    min_c, max_c = -extend, int(c_used) + extend
+                    min_r, max_r = -extend, int(r_used) + extend
+                    for c in range(min_c, max_c):
+                        shift_y = half_v if (c % 2 != 0) else 0.0
+                        x = float(margin) + float(int(round(c * float(step_x))))
+                        for r in range(min_r, max_r):
+                            y = float(margin) + float(int(round(shift_y + r * float(step_y))))
+                            if not (x + S <= 0 or y + S <= 0 or x >= width or y >= height):
+                                centers_d.append((x + float(S) / 2.0, y + float(S) / 2.0))
+                                cr_d.append((c, r))
+            except Exception:
+                centers_d = _kana_hex_collect_visible_centers(
+                    orient=orient,
+                    S=S,
+                    step_x=step_x,
+                    step_y=step_y,
+                    margin=margin,
+                    width=W,
+                    height=H,
+                    extend=extend,
+                    r_used=r_used,
+                    c_used=c_used,
+                    )
+                cr_d = []
+            
+            try:
+                note(f"HexDBG: diag_branch diag={diag} centers={len(centers_d)} images={len(images)}")
+            except Exception:
+                pass
+
             if centers_d:
                 if len(images) > 0 and len(images) < len(centers_d):
                     rep = (len(centers_d) + len(images) - 1) // len(images)
                     images = (list(images) * rep)[:len(centers_d)]
 
                 use_n = min(len(images), len(centers_d))
-                sorted_imgs = reorder_global_spectral_diagonal(list(images[:use_n]), objective=hobj)
+                # 対角グラデを“見た目で分かりやすく”するため、色空間の主成分(1軸)で 1D ソートします（より滑らか）
+                try:
+                    _imgs0 = list(images[:use_n])
+                    vecs = [_avg_lab_vector(p) for p in _imgs0]
+                    mx = sum(v[0] for v in vecs) / float(len(vecs))
+                    my = sum(v[1] for v in vecs) / float(len(vecs))
+                    mz = sum(v[2] for v in vecs) / float(len(vecs))
+                    centered = [(v[0]-mx, v[1]-my, v[2]-mz) for v in vecs]
+                    (d1x, d1y, d1z), _ = _pca1_direction(centered, iters=28)
+                    # 見た目の対角グラデを分かりやすくするため、平均Labの L（明度）で単純ソートします（暗→明）
+                    order = sorted(range(len(vecs)), key=lambda i: vecs[i][0])
+                    sorted_imgs = [_imgs0[i] for i in order]
+                except Exception:
+                    # フォールバック（従来）
+                    sorted_imgs = reorder_global_spectral_diagonal(list(images[:use_n]), objective=hobj)
 
-                xs = [c[0] for c in centers_d[:use_n]]
-                ys = [c[1] for c in centers_d[:use_n]]
-                min_x, max_x = min(xs), max(xs)
-                min_y, max_y = min(ys), max(ys)
-                dx = (max_x - min_x) if max_x > min_x else 1.0
-                dy = (max_y - min_y) if max_y > min_y else 1.0
-                xn = [(x - min_x) / dx for x in xs]
-                yn = [(y - min_y) / dy for y in ys]
-
-                def score_xy(x, y, mode):
+                # 位置スコア: 推定グリッド座標(c,r)で対角スコア化（hexのずれを吸収）
+                if cr_d:
+                    cs = [v[0] for v in cr_d[:use_n]]
+                    rs = [v[1] for v in cr_d[:use_n]]
+                    min_c, max_c = min(cs), max(cs)
+                    min_r, max_r = min(rs), max(rs)
+                    dc = (max_c - min_c) if max_c > min_c else 1.0
+                    dr = (max_r - min_r) if max_r > min_r else 1.0
+                    cn = [(c - min_c) / dc for c in cs]
+                    rn = [(r - min_r) / dr for r in rs]
+                else:
+                    # フォールバック: 物理座標
+                    xs = [c[0] for c in centers_d[:use_n]]
+                    ys = [c[1] for c in centers_d[:use_n]]
+                    min_x, max_x = min(xs), max(xs)
+                    min_y, max_y = min(ys), max(ys)
+                    dx = (max_x - min_x) if max_x > min_x else 1.0
+                    dy = (max_y - min_y) if max_y > min_y else 1.0
+                    cn = [(x - min_x) / dx for x in xs]
+                    rn = [(y - min_y) / dy for y in ys]
+                
+                def score_cr(c, r, mode):
                     if mode == "tlbr":
-                        return x + y
+                        return c + r
                     if mode == "trbl":
-                        return (1.0 - x) + y
+                        return (1.0 - c) + r
                     if mode == "bltr":
-                        return x + (1.0 - y)
+                        return c + (1.0 - r)
                     if mode == "brtl":
-                        return (1.0 - x) + (1.0 - y)
-                    return x + y
-
-                scores = [score_xy(x, y, diag) for x, y in zip(xn, yn)]
+                        return (1.0 - c) + (1.0 - r)
+                    return c + r
+                
+                scores = [score_cr(c, r, diag) for c, r in zip(cn, rn)]
                 pos_order = sorted(range(use_n), key=lambda i: scores[i])
 
                 assigned = [None] * use_n
@@ -4867,7 +5262,7 @@ def _kana_hex_apply_global_and_local_opt(images, _vis_needed, orient, S, step_x,
 def optimize_grid_spectral_hilbert(paths: List[Path], rows:int, cols:int, objective:str="min"):
     """
     色ベクトル→2D射影（numpy があれば PCA、無ければ LAB の (L,a) 簡易）→Hilbert順→格子充填。
-    objective="min": 滑らか / "max": 逆順・蛇行でバラけ。
+    objective="min": 滑らか／"max": 逆順・蛇行でバラけ。
     """
     n = min(len(paths), rows*cols)
     paths = list(paths[:n])
@@ -5178,7 +5573,7 @@ def optimize_cols_hillclimb(cols, H, gutter, iters=1500, show_progress=None, res
     return cols
 
 # ===============================================================
-# Mosaic 色差ヒルクライム（swap / 2opt）
+# Mosaic 色差ヒルクライム（swap／2opt）
 # ===============================================================
 def _seq_adj_sum(order: List[int], vecs: List[Tuple[float,float,float]]) -> float:
     if len(order)<2: return 0.0
@@ -5327,7 +5722,7 @@ def optimize_cols_color_neighbors(cols, objective="max", iters_per_line=200, see
     return cols, {"cols_adj_initial":total_init,"cols_adj_final":total_final,"cols_adj_imp_pct":imp,"objective":objective}
 
 # ===============================================================
-# レイアウト（grid / mosaic）
+# レイアウト（grid／mosaic）
 # ===============================================================
 def compute_grid(n:int, width:int, height:int, rows:Optional[int], cols:Optional[int]):
     if rows is None and cols is None:
@@ -5351,7 +5746,7 @@ def compute_cell_sizes(width:int, height:int, rows:int, cols:int, margin:int, gu
 
 
 # =============================================================================
-# セクション: レイアウト生成（grid / mosaic / hex）
+# セクション: レイアウト生成（grid／mosaic／hex）
 # =============================================================================
 def layout_grid(images: List[Path], width:int, height:int, margin:int, gutter:int,
                 rows:Optional[int], cols:Optional[int], mode:str, bg_rgb:Tuple[int,int,int]):
@@ -5361,7 +5756,7 @@ def layout_grid(images: List[Path], width:int, height:int, margin:int, gutter:in
     width, height: 出力キャンバスのサイズ
     margin, gutter: 外枠の余白・セル間のすき間
     rows, cols: グリッドの行数・列数
-    mode: リサイズモード (cover / contain など)
+    mode: リサイズモード (cover／contain など)
     bg_rgb: 背景色 (R, G, B)
     """
     # レイアウト情報（1回だけ）を表示 (grid)
@@ -5467,42 +5862,92 @@ def layout_grid(images: List[Path], width:int, height:int, margin:int, gutter:in
     canvas=Image.new("RGB",(width,height),bg_rgb); mask=Image.new("L",(width,height),0)
     banner("描画中: Grid")
     total=min(len(images), rows*cols); done=0
-    y=margin; idx=0
+    # --- draw prefetch (CPU): build jobs first, then render tiles in background threads ---
+    jobs = []  # (path, x, y, w, h)
+    y = margin
+    idx = 0
     for r in range(rows):
-        x=margin
+        x = margin
         for c in range(cols):
-            if idx>=len(images): break
+            if idx >= len(images):
+                break
             w, h = col_w[c], row_h[r]
             try:
                 p = images[idx]
-                # 描画段のタイルキャッシュ（同一画像の再利用で効く：topped-up / wrap / extend）
-                if mode == "fill" and globals().get("GRID_FACE_FOCUS_ENABLE", False) and globals().get("FACE_FOCUS_ENABLE", True):
-                    try:
-                        tile = _tile_render_cached(p, w, h, "fill", use_face_focus=True)
-                        canvas.paste(tile, (x, y))
-                        ImageDraw.Draw(mask).rectangle([x, y, x + w - 1, y + h - 1], fill=255)
-                    except Exception:
-                        # フォールバック：旧パス
-                        with open_image_safe(p) as im:
-                            paste_cell(canvas, mask, im, x, y, w, h, mode)
-                else:
-                    if mode == "fit":
-                        tile = _tile_render_cached(p, w, h, "fit", use_face_focus=False)
-                        rx = x + (w - tile.size[0]) // 2
-                        ry = y + (h - tile.size[1]) // 2
-                        canvas.paste(tile, (rx, ry))
-                        ImageDraw.Draw(mask).rectangle([rx, ry, rx + tile.size[0] - 1, ry + tile.size[1] - 1], fill=255)
-                    else:
-                        tile = _tile_render_cached(p, w, h, "fill", use_face_focus=False)
-                        canvas.paste(tile, (x, y))
-                        ImageDraw.Draw(mask).rectangle([x, y, x + w - 1, y + h - 1], fill=255)
-            except Exception as e:
-                print(f"[WARN] {images[idx]}: {e}")
-            x += w + gutter; idx += 1
-            done = min(done + 1, total)
-            if VERBOSE:
-                bar(done, max(1, total), prefix="draw   ", final=(done == total))
+            except Exception:
+                p = images[idx]
+            jobs.append((p, x, y, int(w), int(h)))
+            x += w + gutter
+            idx += 1
         y += row_h[r] + gutter
+
+    _pf_ahead = int(max(0, int(globals().get('DRAW_PREFETCH_AHEAD', 16))))
+    _pf_workers = int(max(1, int(globals().get('DRAW_PREFETCH_WORKERS', 0) or (os.cpu_count() or 4))))
+    _pf_on = bool(globals().get('DRAW_PREFETCH_ENABLE', True)) and (_pf_ahead > 0)
+
+    _grid_use_ff = (mode == 'fill' and bool(globals().get('GRID_FACE_FOCUS_ENABLE', False))
+                    and bool(globals().get('FACE_FOCUS_ENABLE', True)))
+
+    def _grid_render(job):
+        p, _x, _y, w, h = job
+        if _grid_use_ff:
+            tile = _tile_render_cached(p, w, h, 'fill', use_face_focus=True)
+            return 'fill_ff', tile
+        if mode == 'fit':
+            tile = _tile_render_cached(p, w, h, 'fit', use_face_focus=False)
+            return 'fit', tile
+        tile = _tile_render_cached(p, w, h, 'fill', use_face_focus=False)
+        return 'fill', tile
+
+    done = 0
+    _pf_backend = str(globals().get('DRAW_PREFETCH_BACKEND', ('process' if os.name == 'nt' else 'thread'))).lower()
+    _pf_use_mp = _pf_backend in ('process', 'mp', 'multiprocess', 'proc', 'processpool', 'process_pool')
+
+    if _pf_on and jobs:
+        if _pf_use_mp:
+            try:
+                _pf_items = [(job[0], job[3], job[4], mode, _grid_use_ff) for job in jobs]
+                _pf_stream = prefetch_ordered_mp_safe(_pf_items, _pf_worker_grid_render, ahead=_pf_ahead, max_workers=_pf_workers)
+
+                def _wrap_pf():
+                    for i, (_item, _res, _exc) in enumerate(_pf_stream):
+                        yield jobs[i], _res, _exc
+
+                _it = _wrap_pf()
+            except Exception as _e_pf:
+                print(f"[WARN] process prefetch unavailable; fallback to thread. reason={_e_pf}")
+                _it = prefetch_ordered_safe(jobs, _grid_render, ahead=_pf_ahead, max_workers=_pf_workers)
+        else:
+            _it = prefetch_ordered_safe(jobs, _grid_render, ahead=_pf_ahead, max_workers=_pf_workers)
+    else:
+        _it = ((job, _grid_render(job), None) for job in jobs)
+
+    for job, out, exc in _it:
+        p, x, y, w, h = job
+        try:
+            if exc is not None:
+                raise exc
+            kind, tile = out
+            if kind == 'fit':
+                rx = x + (w - tile.size[0]) // 2
+                ry = y + (h - tile.size[1]) // 2
+                canvas.paste(tile, (rx, ry))
+                mask.paste(255, (rx, ry, rx + tile.size[0], ry + tile.size[1]))
+            else:
+                canvas.paste(tile, (x, y))
+                mask.paste(255, (x, y, x + w, y + h))
+        except Exception as e:
+            # フォールバック（旧パス）
+            try:
+                with open_image_safe(p) as im:
+                    paste_cell(canvas, mask, im, x, y, w, h, mode)
+            except Exception as e2:
+                print(f"[WARN] {p}: {e2}")
+        done = min(done + 1, total)
+        if VERBOSE:
+            bar(done, max(1, total), prefix='draw   ', final=(done == total))
+
+    # --- /draw prefetch (CPU) ---
     # 画像が 0 枚のときでも進捗バーを確実に閉じる（未定義変数参照を避ける）
     if total == 0:
         bar(done, 1, prefix="draw   ", final=True)
@@ -5612,7 +6057,7 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
         # （UHでも UW と同じ選択肢で扱えるよう、割り当てポリシーを用意）
         raw_h = H - gutter * max(0, desired_rows - 1)
         base_h_max = max(1, raw_h // max(1, desired_rows))
-        # JUSTIFY_MIN_ROW_H / JUSTIFY_MAX_ROW_H の範囲に制限
+        # JUSTIFY_MIN_ROW_H／JUSTIFY_MAX_ROW_H の範囲に制限
         try:
             min_h = max(1, int(globals().get('JUSTIFY_MIN_ROW_H', JUSTIFY_MIN_ROW_H)))
         except Exception:
@@ -5810,10 +6255,10 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
         _warn_exc_once(e)
         pass
     # --------------------------------------------------------------------
-    # テンポ並べ替え（post / blend）
+    # テンポ並べ替え（post／blend）
     # 事前（pre）でテンポを適用していても、その後の近傍最適化や平均LABソートで
     # 「速い/遅いの交互」が崩れることがあります。
-    # stage が post / blend のときは、現在の行順を一度フラット化してテンポ並べ替えを再適用し、
+    # stage が post／blend のときは、現在の行順を一度フラット化してテンポ並べ替えを再適用し、
     # その順番で行を再構築して最終結果のテンポ感を守ります。
     try:
         if (not bool(globals().get("ARRANGE_FULL_SHUFFLE", False)) and
@@ -6011,7 +6456,7 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
             x_off_global = margin - (global_extra_w // 2)
             # --- gaplessモード用 モザイク拡張割り当て（post-pack） ---
             # 注：gaplessモードは以前、通常のpost-packブロックより前でreturnしてしまい、
-            #     MOSAIC_ENHANCE_PROFILE / ローカル最適化パラメータが効いていないように見えていた。
+            #     MOSAIC_ENHANCE_PROFILE／ローカル最適化パラメータが効いていないように見えていた。
             #     ここでもpost-pack割り当てを適用して効果が見えるようにする。
             try:
                 if _mosaic_enhance_active():
@@ -6087,11 +6532,20 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
                 if bool(globals().get("MOSAIC_POST_DEBUG", False)):
                     print(f"[MOSAIC_POST_DEBUG] UH gapless: post-pack error: {_pp_ex}")
             # --- gapless用post-packここまで ---
+            # --- draw prefetch (CPU) for mosaic-uniform-height ---
+            _pf_ahead = int(max(0, int(globals().get('DRAW_PREFETCH_AHEAD', 16))))
+            _pf_workers = int(max(1, int(globals().get('DRAW_PREFETCH_WORKERS', 0) or (os.cpu_count() or 4))))
+            _pf_on = bool(globals().get('DRAW_PREFETCH_ENABLE', True)) and (_pf_ahead > 0)
+
+            steps = []      # ('skip', None) or ('draw', meta)
+            draw_items = [] # (path, w, h)
+
             for ridx, (rrow, rhh) in enumerate(ext_rows):
                 y_cur = y_positions[ridx]
                 # 画面外（上）ならスキップ
                 if y_cur + rhh <= margin:
-                    done_cnt += len(rrow)
+                    for _ in rrow:
+                        steps.append(('skip', None))
                     continue
                 # 画面外（下）に到達したら終了
                 if y_cur >= margin + H:
@@ -6101,42 +6555,81 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
                     # 画面外（左）ならスキップ
                     if x_cur + wj_t <= margin:
                         x_cur += wj_t + gutter
-                        done_cnt += 1
+                        steps.append(('skip', None))
                         continue
-                    # 画面外（右）ならスキップ
+                    # 画面外（右）ならスキップ（以降も右端外のため、x_cur は進めない）
                     if x_cur >= margin + W:
-                        done_cnt += 1
+                        steps.append(('skip', None))
                         continue
-                    # 水平方向のクリッピング量を計算します
+                    # クリッピング量
                     l_clip = max(margin - x_cur, 0)
                     r_clip = max((x_cur + wj_t) - (margin + W), 0)
-                    v_w = wj_t - l_clip - r_clip
-                    # 垂直方向のクリッピング量を計算します
+                    v_w = int(wj_t - l_clip - r_clip)
                     t_clip = max(margin - y_cur, 0)
                     b_clip = max((y_cur + rhh) - (margin + H), 0)
-                    v_h = rhh - t_clip - b_clip
+                    v_h = int(rhh - t_clip - b_clip)
+
                     if v_w > 0 and v_h > 0:
-                        try:
-                            with open_image_safe(p_t) as im_tt:
-                                # mosaic：タイル矩形そのものをアス比に合わせて作り、アス比維持（クロップなし・黒帯なし）
-                                rez = hq_resize(im_tt, (max(1, wj_t), max(1, rhh)))
-                                # 画面外にはみ出した分を切り抜きます
-                                if l_clip != 0 or r_clip != 0 or t_clip != 0 or b_clip != 0:
-                                    rez = rez.crop((int(l_clip), int(t_clip), int(l_clip + v_w), int(t_clip + v_h)))
-                                nx = x_cur + l_clip
-                                ny = y_cur + t_clip
-                                canvas_ext.paste(rez, (int(nx), int(ny)))
-                                ImageDraw.Draw(mask_ext).rectangle([
-                                    int(nx), int(ny), int(nx + v_w - 1), int(ny + v_h - 1)
-                                ], fill=255)
-                        except Exception as ex_draw:
-                            print(f"[WARN] {p_t}: {ex_draw}")
+                        nx = int(x_cur + l_clip)
+                        ny = int(y_cur + t_clip)
+                        meta = (p_t, int(wj_t), int(rhh), int(l_clip), int(t_clip), int(v_w), int(v_h), nx, ny)
+                        steps.append(('draw', meta))
+                        draw_items.append((p_t, int(wj_t), int(rhh)))
+                    else:
+                        steps.append(('skip', None))
+
                     x_cur += wj_t + gutter
+
+            def _mosaic_uh_render(item):
+                p_t, wj_t, rhh = item
+                with open_image_safe(p_t, draft_to=(max(1, int(wj_t)), max(1, int(rhh))), force_mode='RGB') as im_tt:
+                    return hq_resize(im_tt, (max(1, int(wj_t)), max(1, int(rhh))))
+
+            _pf_backend = str(globals().get('DRAW_PREFETCH_BACKEND', ('process' if os.name == 'nt' else 'thread'))).lower()
+            _pf_use_mp = _pf_backend in ('process', 'mp', 'multiprocess', 'proc', 'processpool', 'process_pool')
+
+            if _pf_on and draw_items:
+                try:
+                    if _pf_use_mp:
+                        _draw_it = iter(prefetch_ordered_mp_safe(draw_items, _pf_worker_mosaic_uh_render, ahead=_pf_ahead, max_workers=_pf_workers))
+                    else:
+                        _draw_it = iter(prefetch_ordered_safe(draw_items, _mosaic_uh_render, ahead=_pf_ahead, max_workers=_pf_workers))
+                except Exception as _e_pf:
+                    print(f"[WARN] mosaic-UH process prefetch unavailable; fallback to thread. reason={_e_pf}")
+                    _draw_it = iter(prefetch_ordered_safe(draw_items, _mosaic_uh_render, ahead=_pf_ahead, max_workers=_pf_workers))
+            else:
+                _pf_on = False
+                _draw_it = None
+
+
+            for kind, meta in steps:
+                if kind != 'draw':
                     done_cnt += 1
                     if VERBOSE:
-                        bar(done_cnt, max(1, total_draw), prefix="draw   ", final=False)
-            # 描画がクリップされると done_cnt と total_draw が一致しないことがあります。
-            # 最後に bar(..., final=True) を呼んで必ず 100% 表示で締めます。
+                        bar(done_cnt, max(1, total_draw), prefix='draw   ', final=False)
+                    continue
+
+                p_t, wj_t, rhh, l_clip, t_clip, v_w, v_h, nx, ny = meta
+                try:
+                    if _pf_on:
+                        _item, rez, exc = next(_draw_it)
+                        if exc is not None:
+                            raise exc
+                    else:
+                        rez = _mosaic_uh_render((p_t, wj_t, rhh))
+
+                    if l_clip != 0 or t_clip != 0 or v_w != wj_t or v_h != rhh:
+                        rez = rez.crop((int(l_clip), int(t_clip), int(l_clip + v_w), int(t_clip + v_h)))
+                    canvas_ext.paste(rez, (int(nx), int(ny)))
+                    mask_ext.paste(255, (int(nx), int(ny), int(nx + v_w), int(ny + v_h)))
+                except Exception as ex_draw:
+                    print(f"[WARN] {p_t}: {ex_draw}")
+
+                done_cnt += 1
+                if VERBOSE:
+                    bar(done_cnt, max(1, total_draw), prefix='draw   ', final=False)
+
+            # --- /draw prefetch (CPU) for mosaic-uniform-height ---
             if total_draw == 0:
                 # 1枚も描けなかった場合でも final=True で1回だけ表示
                 bar(done_cnt, 1, prefix="draw   ", final=True)
@@ -6294,7 +6787,7 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
                         else:
                             rez = _cover_rect_center(im, max(1, nw), max(1, h))
                         canvas.paste(rez, (x, y))
-                        ImageDraw.Draw(mask).rectangle([x, y, x + nw - 1, y + h - 1], fill=255)
+                        mask.paste(255, (x, y, x + nw, y + h))
                 except Exception as e:
                     print(f"[WARN] {p}: {e}")
                 x += nw + gutter
@@ -6321,7 +6814,7 @@ def layout_mosaic_uniform_height(paths: List[Path], width: int, height: int, mar
                             # 顔フォーカス無効時は中央クロップを使います
                             rez = _cover_rect_center(im, max(1, wj), max(1, h))
                         canvas.paste(rez, (x, y))
-                        ImageDraw.Draw(mask).rectangle([x, y, x + wj - 1, y + h - 1], fill=255)
+                        mask.paste(255, (x, y, x + wj, y + h))
                 except Exception as e:
                     print(f"[WARN] {p}: {e}")
                 x += wj + gutter
@@ -6548,9 +7041,9 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
             _warn_exc_once(e)
             pass
     # --------------------------------------------------------------------
-    # テンポ並べ替え（post / blend）
+    # テンポ並べ替え（post／blend）
     # 列バランス調整や最終整列でテンポ（速い/遅いの交互）が崩れることがあるため、
-    # stage が post / blend のときは列内パスをフラット化してテンポ並べ替えを再適用し、
+    # stage が post／blend のときは列内パスをフラット化してテンポ並べ替えを再適用し、
     # 固定列幅 w に合わせて高さを再計算しつつ列を再構築します。
     try:
         if (not bool(globals().get("ARRANGE_FULL_SHUFFLE", False)) and
@@ -6864,23 +7357,61 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
                     print(f"[MOSAIC_POST_DEBUG] UW gapless: post-pack error: {_pp_ex}")
             # --- UW gapless用post-packここまで ---
 
-            # グリッド座標に従って、クリッピング無しで全タイルを描画します
+            # --- draw prefetch (CPU) for mosaic-uniform-width ---
+            _pf_ahead = int(max(0, int(globals().get('DRAW_PREFETCH_AHEAD', 16))))
+            _pf_workers = int(max(1, int(globals().get('DRAW_PREFETCH_WORKERS', 0) or (os.cpu_count() or 4))))
+            _pf_on = bool(globals().get('DRAW_PREFETCH_ENABLE', True)) and (_pf_ahead > 0)
+
+            steps = []      # (p_t, wj_t, h_t, x_cur, y_cur)
+            draw_items = [] # (p_t, wj_t, h_t)
+
             for jdx, ext_col in enumerate(ext_cols):
                 x_cur = jdx * (w + gutter)
                 y_cur_col = 0
                 for (p_t, wj_t, h_t) in ext_col:
-                    try:
-                        with open_image_safe(p_t) as im_tt:
-                            # mosaic：タイル矩形そのものをアス比に合わせて作り、アス比維持（クロップなし・黒帯なし）
-                            rez = hq_resize(im_tt, (max(1, wj_t), max(1, h_t)))
-                            mosaic_img.paste(rez, (int(x_cur), int(y_cur_col)))
-                            ImageDraw.Draw(mosaic_mask).rectangle([int(x_cur), int(y_cur_col), int(x_cur + wj_t - 1), int(y_cur_col + h_t - 1)], fill=255)
-                    except Exception as ex_draw:
-                        print(f'[WARN] {p_t}: {ex_draw}')
+                    steps.append((p_t, int(wj_t), int(h_t), int(x_cur), int(y_cur_col)))
+                    draw_items.append((p_t, int(wj_t), int(h_t)))
                     y_cur_col += h_t + gutter
-                    done_cnt += 1
-                    if VERBOSE:
-                        bar(done_cnt, max(1, total_draw), prefix='draw   ', final=False)
+
+            def _mosaic_uw_render(item):
+                p_t, wj_t, h_t = item
+                with open_image_safe(p_t, draft_to=(max(1, int(wj_t)), max(1, int(h_t))), force_mode='RGB') as im_tt:
+                    return hq_resize(im_tt, (max(1, int(wj_t)), max(1, int(h_t))))
+
+            _pf_backend = str(globals().get('DRAW_PREFETCH_BACKEND', ('process' if os.name == 'nt' else 'thread'))).lower()
+            _pf_use_mp = _pf_backend in ('process', 'mp', 'multiprocess', 'proc', 'processpool', 'process_pool')
+
+            if _pf_on and draw_items:
+                try:
+                    if _pf_use_mp:
+                        _draw_it = iter(prefetch_ordered_mp_safe(draw_items, _pf_worker_mosaic_uw_render, ahead=_pf_ahead, max_workers=_pf_workers))
+                    else:
+                        _draw_it = iter(prefetch_ordered_safe(draw_items, _mosaic_uw_render, ahead=_pf_ahead, max_workers=_pf_workers))
+                except Exception as _e_pf:
+                    print(f"[WARN] mosaic-UW process prefetch unavailable; fallback to thread. reason={_e_pf}")
+                    _draw_it = iter(prefetch_ordered_safe(draw_items, _mosaic_uw_render, ahead=_pf_ahead, max_workers=_pf_workers))
+            else:
+                _pf_on = False
+                _draw_it = None
+
+
+            for (p_t, wj_t, h_t, x_cur, y_cur_col) in steps:
+                try:
+                    if _pf_on:
+                        _item, rez, exc = next(_draw_it)
+                        if exc is not None:
+                            raise exc
+                    else:
+                        rez = _mosaic_uw_render((p_t, wj_t, h_t))
+                    mosaic_img.paste(rez, (int(x_cur), int(y_cur_col)))
+                    mosaic_mask.paste(255, (int(x_cur), int(y_cur_col), int(x_cur + wj_t), int(y_cur_col + h_t)))
+                except Exception as ex_draw:
+                    print(f"[WARN] {p_t}: {ex_draw}")
+                done_cnt += 1
+                if VERBOSE:
+                    bar(done_cnt, max(1, total_draw), prefix='draw   ', final=False)
+
+            # --- /draw prefetch (CPU) for mosaic-uniform-width ---
             # 進捗バーを必ず 100% で締めます
             if total_draw == 0:
                 bar(done_cnt, 1, prefix='draw   ', final=True)
@@ -7016,7 +7547,7 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
                                 # 顔フォーカス無効時は中央クロップします
                                 rez = _cover_rect_center(im, max(1, wj), max(1, nh))
                             canvas.paste(rez, (x, y))
-                            ImageDraw.Draw(mask).rectangle([x, y, x + wj - 1, y + nh - 1], fill=255)
+                            mask.paste(255, (x, y, x + wj, y + nh))
                     except Exception as e:
                         print(f"[WARN] {p}: {e}")
                     y += nh + gutter
@@ -7045,7 +7576,7 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
                                     # 顔フォーカス無効時は中央クロップします
                                     rez = _cover_rect_center(im, max(1, wj), max(1, h))
                                 canvas.paste(rez, (x, y))
-                                ImageDraw.Draw(mask).rectangle([x, y, x + wj - 1, y + h - 1], fill=255)
+                                mask.paste(255, (x, y, x + wj, y + h))
                         except Exception as e:
                             print(f"[WARN] {p}: {e}")
                         # 次の画像の y 位置を更新
@@ -7073,7 +7604,7 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
                                 else:
                                     rez = _cover_rect_center(im, max(1, wj), max(1, h))
                                 canvas.paste(rez, (x, y))
-                                ImageDraw.Draw(mask).rectangle([x, y, x + wj - 1, y + h - 1], fill=255)
+                                mask.paste(255, (x, y, x + wj, y + h))
                         except Exception as e:
                             print(f"[WARN] {p}: {e}")
                         y += h + gutter
@@ -7088,7 +7619,7 @@ def layout_mosaic_uniform_width(paths: List[Path], width: int, height: int, marg
     return canvas, mask, layout_info
 
 # ===============================================================
-# 明るさ補正（背景マスク込み / None安全）
+# 明るさ補正（背景マスク込み／None安全）
 # ===============================================================
 def mean_luma_masked(img: Image.Image, mask: Optional[Image.Image], sample: int = 512) -> Optional[float]:
     """画像の平均輝度（0.0〜1.0）を計算します。
@@ -7436,7 +7967,7 @@ def _tempo_apply(images):
 # 共有フェイス検出ヘルパー
 # `_cover_square_face_focus` と `_cover_rect_face_focus` で重複していた OpenCV ベースの検出処理を
 # ここに集約します。最良の顔（あれば）、上半身領域（任意）、サリエンシー注目点（任意）を返します。
-# また、除外理由などの統計を `_FDBG` / `_FDBG2` に加算します。
+# また、除外理由などの統計を `_FDBG`／`_FDBG2` に加算します。
 def _get_focus_candidates(im: Image.Image, src_path=None) -> dict:
     """フォーカスクロップ用の候補（顔/上半身/サリエンシー）を検出して返します。
 
@@ -7445,7 +7976,7 @@ def _get_focus_candidates(im: Image.Image, src_path=None) -> dict:
       - upper    : (x, y, w, h) または None（FACE_FOCUS_USE_UPPER=True のときのみ）
       - saliency : (cx, cy) または None（FACE_FOCUS_USE_SALIENCY=True のときのみ）
 
-    検出中に `_FDBG` / `_FDBG2`（除外理由・目検証の成否など）の統計を更新します。
+    検出中に `_FDBG`／`_FDBG2`（除外理由・目検証の成否など）の統計を更新します。
     ただし、実際にどの候補を採用したか（frontal/profile の採用カウントなど）は
     呼び出し側で更新します。
 
@@ -7493,7 +8024,7 @@ def _get_focus_candidates(im: Image.Image, src_path=None) -> dict:
                 # アスペクト比が極端なものは除外
                 ratio = w / float(h + 1e-6)
                 # 顔候補の縦横比（w/h）。誤検出（極端に縦長/横長）を弾くためのチェック。
-                # 許容範囲は FACE_FOCUS_FACE_RATIO_MIN / MAX で調整できます。
+                # 許容範囲は FACE_FOCUS_FACE_RATIO_MIN／MAX で調整できます。
                 rmin = float(globals().get("FACE_FOCUS_FACE_RATIO_MIN", 0.65))
                 rmax = float(globals().get("FACE_FOCUS_FACE_RATIO_MAX", 1.60))
                 if ratio < rmin or ratio > rmax:
@@ -7668,7 +8199,7 @@ def set_wallpaper(path: Path, style: str = "Fill"):
 
     引数:
         path: 壁紙に設定する画像ファイルのパス
-        style: 表示スタイル（"Fill" / "Fit" / "Stretch" / "Center"）
+        style: 表示スタイル（"Fill"／"Fit"／"Stretch"／"Center"）
     """
     # Windows 以外では何もしない
     import sys
@@ -7745,8 +8276,8 @@ def write_used_lists(imgs: Sequence[ImageRef], rows:int, cols:int, seed:int, tar
     with open(LIST_CSV,"w",encoding="utf-8-sig",newline="") as f:
         w=csv.writer(f); w.writerow(["index","row","col","abs_path","size_bytes","mtime_local"])
         for i,p in enumerate(imgs,1):
-            r = i//max(1,cols)+1 if cols else 1
-            c = i%max(1,cols)+1 if cols else i
+            r = (i-1)//max(1,cols)+1 if cols else 1
+            c = (i-1)%max(1,cols)+1 if cols else i
             size,mt=file_info(p)
             w.writerow([i,r,c,_imgref_display(p),size,mt])
 
@@ -7785,7 +8316,7 @@ def choose_random_layout(rng: random.Random, candidates: Sequence[str]) -> str:
 
 
 # =============================================================================
-# セクション: エントリーポイント（main）
+# セクション: エントリーポイント（メイン）
 # =============================================================================
 def main():
     """コマンドライン引数や既定フォルダを解釈し、壁紙生成処理を一通り実行するエントリーポイント。"""
@@ -7868,7 +8399,8 @@ def main():
 
 
     # シード
-    seed_used = (SHUFFLE_SEED if isinstance(SHUFFLE_SEED,int) else secrets.randbits(64))
+    _ss = globals().get("SHUFFLE_SEED", None)
+    seed_used = (_ss if isinstance(_ss, int) else secrets.randbits(64))
     rng=random.Random(seed_used); note(f"Seed: {seed_used}")
     # 抽出モードを表示（ログの追跡用）
     try:
@@ -8190,12 +8722,15 @@ def _kana_layout_grid_hex_tight_v8_wrapper(fn):
         hexmask = _hexmask_square(S)
         # --- KANA: draw 高速化（タイル生成のメモリキャッシュ + mask 用白タイル再利用） ---
         from collections import OrderedDict
-        _tile_cache_max = int(max(0, int(globals().get("HEX_TILE_MEMCACHE_MAX", 512))))
+        try:
+            _tile_cache_max = int(globals().get("HEX_TILE_MEMCACHE_MAX", 4096))
+        except Exception:
+            _tile_cache_max = 4096
         _tile_cache = OrderedDict()
         _whiteL = Image.new("L", (S, S), 255)
 
         def _tile_cache_get(k: str):
-            if _tile_cache_max <= 0:
+            if _tile_cache_max < 0:
                 return None
             v = _tile_cache.get(k)
             if v is not None:
@@ -8207,13 +8742,14 @@ def _kana_layout_grid_hex_tight_v8_wrapper(fn):
             return v
 
         def _tile_cache_put(k: str, v):
-            if _tile_cache_max <= 0:
+            if _tile_cache_max < 0:
                 return
             try:
                 _tile_cache[k] = v
                 _tile_cache.move_to_end(k)
-                while len(_tile_cache) > _tile_cache_max:
-                    _tile_cache.popitem(last=False)
+                if _tile_cache_max > 0:
+                    while len(_tile_cache) > _tile_cache_max:
+                        _tile_cache.popitem(last=False)
             except Exception as e:
                 _warn_exc_once(e)
                 pass
@@ -8405,6 +8941,115 @@ def _kana_layout_grid_hex_tight_v8_wrapper(fn):
             _cur = 0
 
             _cur = 0
+            # --- draw prefetch (CPU) : hex tiles ---
+            # hex の draw はタイル生成（open/decode + crop/face-focus）が重いので、
+            # 先に（可視領域ぶんの）タイルを並列生成してキャッシュへ入れておきます。
+            try:
+                _pf_ahead = int(max(0, int(globals().get('DRAW_PREFETCH_AHEAD', 16))))
+                _pf_workers = int(max(1, int(globals().get('DRAW_PREFETCH_WORKERS', 0) or (os.cpu_count() or 4))))
+                _pf_on = bool(globals().get('DRAW_PREFETCH_ENABLE', True)) and (_pf_ahead > 0)
+                _pf_backend = str(globals().get('DRAW_PREFETCH_BACKEND', ('process' if os.name == 'nt' else 'thread'))).lower()
+                _pf_use_mp = _pf_backend in ('process','mp','multiprocess','proc','processpool','process_pool','processpoolexecutor')
+            except Exception:
+                _pf_ahead, _pf_workers, _pf_on, _pf_use_mp = 0, (os.cpu_count() or 4), False, False
+
+            if _pf_on and total > 0:
+                try:
+                    _cw, _ch = canvas.size
+                    def _hex_would_paste(_x, _y, _s, _w, _h):
+                        return not (_x >= _w or _y >= _h or (_x + _s) <= 0 or (_y + _s) <= 0)
+
+                    _need = []
+                    _seen = set()
+                    _tmp_cur = 0
+                    # 先読み上限：可視領域で実際に必要なユニーク画像数まで（wrap時でも total まで）
+                    _lim = int(min(total, int(_vis_needed)))
+
+                    for r in range(min_r, max_r):
+                        shift = half_shift if (r % 2 != 0) else 0.0
+                        y = margin + int(round(r*step_y))
+                        for c in range(min_c, max_c):
+                            x = margin + int(round(shift + c*step_x))
+                            if _tmp_cur >= total:
+                                if total < _vis_needed:
+                                    _tmp_cur = 0
+                                else:
+                                    continue
+                            if not _hex_would_paste(x, y, S, _cw, _ch):
+                                continue
+                            _p = images[_tmp_cur]
+                            _k = str(_p)
+                            if _k not in _seen and _tile_cache_get(_k) is None:
+                                _need.append((_p, S))
+                                _seen.add(_k)
+                                if len(_need) >= _lim:
+                                    break
+                            _tmp_cur += 1
+                        if len(_need) >= _lim:
+                            break
+
+                    if _need:
+                        _pf_total = len(_need)
+                        try:
+                            # Prefetch は重い工程なので、進捗が動かないと“固まった”ように見えます。
+                            # Hex の場合はここでタイル生成（decode/crop/face-focus）を並列化します。
+                            _lang = str(globals().get("UI_LANG", "")).lower()
+                            banner("Prefetch: Hex tiles" if _lang == "en" else "事前生成: Hex タイル")
+                        except Exception as e:
+                            _warn_exc_once(e)
+                            pass
+
+                        _ui_prog = bool(globals().get("UI_PROGRESS", True))
+                        if _ui_prog:
+                            try:
+                                bar(0, _pf_total, prefix="prefetch ", final=False)
+                                import sys as _sys
+                                _sys.stdout.flush()
+                            except Exception as e:
+                                _warn_exc_once(e)
+                                pass
+
+                        _step = int(max(1, int(globals().get("UI_PROGRESS_EVERY", 8))))
+                        _pf_done = 0
+                        # キャッシュ上限が小さいと prefetch 済みタイルが追い出されて draw が遅くなるため、
+                        # 必要数（_pf_total）まで自動で上限を引き上げます（0=無制限、-1=無効）
+                        try:
+                            if _tile_cache_max >= 0 and _tile_cache_max != 0 and _tile_cache_max < _pf_total:
+                                _tile_cache_max = int(_pf_total)
+                        except Exception:
+                            pass
+
+                        if _pf_use_mp:
+                            with ProcessPoolExecutor(max_workers=_pf_workers) as _ex:
+                                for _k, _tile in _ex.map(_pf_worker_hex_render, _need, chunksize=1):
+                                    if _tile is not None:
+                                        _tile_cache_put(_k, _tile)
+                                    _pf_done += 1
+                                    if _ui_prog and ((_pf_done % _step) == 0 or _pf_done == _pf_total):
+                                        try:
+                                            bar(_pf_done, _pf_total, prefix="prefetch ", final=(_pf_done == _pf_total))
+                                            import sys as _sys
+                                            _sys.stdout.flush()
+                                        except Exception as e:
+                                            _warn_exc_once(e)
+                                            pass
+                        else:
+                            with ThreadPoolExecutor(max_workers=_pf_workers) as _ex:
+                                for _k, _tile in _ex.map(_pf_worker_hex_render, _need):
+                                    if _tile is not None:
+                                        _tile_cache_put(_k, _tile)
+                                    _pf_done += 1
+                                    if _ui_prog and ((_pf_done % _step) == 0 or _pf_done == _pf_total):
+                                        try:
+                                            bar(_pf_done, _pf_total, prefix="prefetch ", final=(_pf_done == _pf_total))
+                                            import sys as _sys
+                                            _sys.stdout.flush()
+                                        except Exception as e:
+                                            _warn_exc_once(e)
+                                            pass
+                except Exception as e:
+                    _warn_exc_once(e)
+                    pass
             for r in range(min_r, max_r):
                 shift = half_shift if (r % 2 != 0) else 0.0
                 y = margin + int(round(r*step_y))
@@ -8435,7 +9080,8 @@ def _kana_layout_grid_hex_tight_v8_wrapper(fn):
                     if _did:
                         _cur += 1
                     done += 1
-                    if VERBOSE: bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
+                    if bool(globals().get('UI_PROGRESS', True)) and ((done % int(max(1, int(globals().get('UI_PROGRESS_EVERY', 8)))) == 0) or (done >= (max_r-min_r)*(max_c-min_c))):
+                        bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
         else:
             half_v = step_y/2.0
             min_c = -extend; max_c = c_used + extend
@@ -8497,7 +9143,8 @@ def _kana_layout_grid_hex_tight_v8_wrapper(fn):
                     if _did:
                         _cur += 1
                     done += 1
-                    if VERBOSE: bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
+                    if bool(globals().get('UI_PROGRESS', True)) and ((done % int(max(1, int(globals().get('UI_PROGRESS_EVERY', 8)))) == 0) or (done >= (max_r-min_r)*(max_c-min_c))):
+                        bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
 
         bar(max(done, (max_r-min_r)*(max_c-min_c)), (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=True)
 
@@ -8599,7 +9246,7 @@ def _cover_square_face_focus(im, S: int, src_path=None):
     顔（正面/横顔）・上半身・サリエンシー（目立つ領域）の候補を `_get_focus_candidates()` で取得し、
     候補があればその中心を基準にズーム倍率とクロップ位置を決めます。
     候補が無い／検出が無効／例外が起きた場合は、中央クロップ（必要ならバイアス込み）にフォールバックします。
-    ※デバッグ用に `_FDBG` / `_FDBG2` のカウンタが更新されます。
+    ※デバッグ用に `_FDBG`／`_FDBG2` のカウンタが更新されます。
     """
     from PIL import Image
     global _FDBG, _FDBG2
@@ -8719,7 +9366,7 @@ def _cover_rect_face_focus(im: Image.Image, cw: int, ch: int) -> Image.Image:
     顔（正面/横顔）・上半身・サリエンシーの候補を `_get_focus_candidates()` で取得し、
     候補があればその中心を基準にズーム倍率とクロップ位置を決めます。
     候補が無い／検出が無効／例外が起きた場合は、中央クロップ（必要ならバイアス込み）にフォールバックします。
-    ※デバッグ用に `_FDBG` / `_FDBG2` のカウンタが更新されます。
+    ※デバッグ用に `_FDBG`／`_FDBG2` のカウンタが更新されます。
     """
     from PIL import Image
     global _FDBG, _FDBG2
@@ -8914,12 +9561,15 @@ def _kana_hex_wrapper(fn):
         hexmask = _hexmask_square(S)
         # --- KANA: draw 高速化（タイル生成のメモリキャッシュ + mask 用白タイル再利用） ---
         from collections import OrderedDict
-        _tile_cache_max = int(max(0, int(globals().get("HEX_TILE_MEMCACHE_MAX", 512))))
+        try:
+            _tile_cache_max = int(globals().get("HEX_TILE_MEMCACHE_MAX", 4096))
+        except Exception:
+            _tile_cache_max = 4096
         _tile_cache = OrderedDict()  # key(str path) -> PIL.Image (SxS RGB)
         _whiteL = Image.new("L", (S, S), 255)
 
         def _tile_cache_get(k: str):
-            if _tile_cache_max <= 0:
+            if _tile_cache_max < 0:
                 return None
             v = _tile_cache.get(k)
             if v is not None:
@@ -8931,13 +9581,14 @@ def _kana_hex_wrapper(fn):
             return v
 
         def _tile_cache_put(k: str, v):
-            if _tile_cache_max <= 0:
+            if _tile_cache_max < 0:
                 return
             try:
                 _tile_cache[k] = v
                 _tile_cache.move_to_end(k)
-                while len(_tile_cache) > _tile_cache_max:
-                    _tile_cache.popitem(last=False)
+                if _tile_cache_max > 0:
+                    while len(_tile_cache) > _tile_cache_max:
+                        _tile_cache.popitem(last=False)
             except Exception as e:
                 _warn_exc_once(e)
                 pass
@@ -8952,7 +9603,7 @@ def _kana_hex_wrapper(fn):
         idx = 0; done = 0
         # --------------------------------------------------------------
         # 内部ヘルパ: 重複除去→不足分補充→（必要なら）シャッフル→tempo 配置
-        # row-shift / col-shift どちらでも同じ前処理を行うため、共通化しています。
+        # row-shift／col-shift どちらでも同じ前処理を行うため、共通化しています。
         def _hex_prepare_images_local(img_list: List[Path], vis_needed: int) -> List[Path]:
             """hex レイアウト用の画像リスト前処理。
 
@@ -9136,7 +9787,8 @@ def _kana_hex_wrapper(fn):
                     if _did:
                         _cur += 1
                     done += 1
-                    if VERBOSE: bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
+                    if bool(globals().get('UI_PROGRESS', True)) and ((done % int(max(1, int(globals().get('UI_PROGRESS_EVERY', 8)))) == 0) or (done >= (max_r-min_r)*(max_c-min_c))):
+                        bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
         else:
             half_v = step_y/2.0
             min_c = -extend; max_c = c_used + extend
@@ -9272,6 +9924,100 @@ def _kana_hex_wrapper(fn):
                 _warn_exc_once(e)
                 pass
             _cur = 0
+            # --- draw prefetch (CPU) : hex tiles ---
+            # hex の draw はタイル生成（open/decode + crop/face-focus）が重いので、
+            # 先に（可視領域ぶんの）タイルを並列生成してキャッシュへ入れておきます。
+            try:
+                _pf_ahead = int(max(0, int(globals().get('DRAW_PREFETCH_AHEAD', 16))))
+                _pf_workers = int(max(1, int(globals().get('DRAW_PREFETCH_WORKERS', 0) or (os.cpu_count() or 4))))
+                _pf_on = bool(globals().get('DRAW_PREFETCH_ENABLE', True)) and (_pf_ahead > 0)
+                _pf_backend = str(globals().get('DRAW_PREFETCH_BACKEND', ('process' if os.name == 'nt' else 'thread'))).lower()
+                _pf_use_mp = _pf_backend in ('process','mp','multiprocess','proc','processpool','process_pool','processpoolexecutor')
+            except Exception:
+                _pf_ahead, _pf_workers, _pf_on, _pf_use_mp = 0, (os.cpu_count() or 4), False, False
+
+            if _pf_on and total > 0:
+                try:
+                    _cw, _ch = canvas.size
+                    def _hex_would_paste(_x, _y, _s, _w, _h):
+                        return not (_x >= _w or _y >= _h or (_x + _s) <= 0 or (_y + _s) <= 0)
+
+                    _need = []
+                    _seen = set()
+                    _tmp_cur = 0
+                    _lim = int(min(total, int(_vis_needed)))
+
+                    for c in range(min_c, max_c):
+                        shift_y = half_v if (c % 2 != 0) else 0.0
+                        x = margin + int(round(c*step_x))
+                        for r in range(min_r, max_r):
+                            y = margin + int(round(shift_y + r*step_y))
+                            if _tmp_cur >= total:
+                                if total < _vis_needed:
+                                    _tmp_cur = 0
+                                else:
+                                    continue
+                            if not _hex_would_paste(x, y, S, _cw, _ch):
+                                continue
+                            _p = images[_tmp_cur]
+                            _k = str(_p)
+                            if _k not in _seen and _tile_cache_get(_k) is None:
+                                _need.append((_p, S))
+                                _seen.add(_k)
+                                if len(_need) >= _lim:
+                                    break
+                            _tmp_cur += 1
+                        if len(_need) >= _lim:
+                            break
+
+                    if _need:
+                        _pf_total = len(_need)
+                        _pf_done = 0
+                        try:
+                            _lang = str(globals().get('UI_LANG', '')).lower()
+                            banner('Prefetch: Hex tiles' if _lang == 'en' else '事前生成: Hex タイル')
+                        except Exception as e:
+                            _warn_exc_once(e)
+                            pass
+                        _ui_prog = bool(globals().get('UI_PROGRESS', True))
+                        _step = int(max(1, int(globals().get('UI_PROGRESS_EVERY', 8))))
+                        if _ui_prog:
+                            try:
+                                bar(0, _pf_total, prefix='prefetch ', final=False)
+                                import sys as _sys
+                                _sys.stdout.flush()
+                            except Exception as e:
+                                _warn_exc_once(e)
+                                pass
+                        if _pf_use_mp:
+                            with ProcessPoolExecutor(max_workers=_pf_workers) as _ex:
+                                for _k, _tile in _ex.map(_pf_worker_hex_render, _need, chunksize=1):
+                                    if _tile is not None:
+                                        _tile_cache_put(_k, _tile)
+                                    _pf_done += 1
+                                    if _ui_prog and ((_pf_done % _step) == 0 or _pf_done == _pf_total):
+                                        bar(_pf_done, _pf_total, prefix='prefetch ', final=(_pf_done == _pf_total))
+                                        try:
+                                            import sys as _sys
+                                            _sys.stdout.flush()
+                                        except Exception:
+                                            pass
+                        else:
+                            with ThreadPoolExecutor(max_workers=_pf_workers) as _ex:
+                                for _k, _tile in _ex.map(_pf_worker_hex_render, _need):
+                                    if _tile is not None:
+                                        _tile_cache_put(_k, _tile)
+                                    _pf_done += 1
+                                    if _ui_prog and ((_pf_done % _step) == 0 or _pf_done == _pf_total):
+                                        bar(_pf_done, _pf_total, prefix='prefetch ', final=(_pf_done == _pf_total))
+                                        try:
+                                            import sys as _sys
+                                            _sys.stdout.flush()
+                                        except Exception:
+                                            pass
+                except Exception as e:
+                    _warn_exc_once(e)
+                    pass
             for c in range(min_c, max_c):
                 shift_y = half_v if (c % 2 != 0) else 0.0
                 x = margin + int(round(c*step_x))
@@ -9303,7 +10049,8 @@ def _kana_hex_wrapper(fn):
                     if _did:
                         _cur += 1
                     done += 1
-                    if VERBOSE: bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
+                    if bool(globals().get('UI_PROGRESS', True)) and ((done % int(max(1, int(globals().get('UI_PROGRESS_EVERY', 8)))) == 0) or (done >= (max_r-min_r)*(max_c-min_c))):
+                        bar(done, (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=False)
 
         bar(max(done, (max_r-min_r)*(max_c-min_c)), (max_r-min_r)*(max_c-min_c), prefix="draw   ", final=True)
         if globals().get("FACE_FOCUS_DEBUG", True):
