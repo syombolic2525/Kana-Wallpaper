@@ -1,10 +1,10 @@
 """\
-Kana Wallpaper Launcher（統一UI＋プリセット対応版）
+Kana Wallpaper Launcher
 ==================================================
 
 目的
 ----
-このランチャーは、Kana Wallpaper の各レイアウト（mosaic / grid / hex / random）で
+このランチャーは、Kana Wallpaper の各レイアウト（mosaic／grid／hex／random）で
 質問の流れや用語をできるだけ統一し、不要な質問を減らしつつ、
 必要なところは選べる（グラデ方向・散らし・最適化パラメータ等）ようにするためのものです。
 
@@ -12,32 +12,23 @@ Kana Wallpaper Launcher（統一UI＋プリセット対応版）
 ----------------
 * **プリセット機能あり**
   - 手動設定 → 任意で保存
-  - プリセットから開始 / ランダムプリセットから開始
-  - **B方式**：プリセット開始後に「このまま実行 / 編集してから実行 / 戻る」を選べる
-  - 保存時の **自動命名は廃止**（名前は必須。空なら保存しない）
+  - プリセットから開始／ランダムプリセットから開始
   - プリセット一覧は「名前＋概要（サマリ）＋作成日時」を表示
-  
+
   - mosaic-uniform-height：ROWS（行数）だけ指定
   - mosaic-uniform-width：COLS（列数）だけ指定
   - キャンバス縦横比（core の WIDTH/HEIGHT）からもう一方を推定し、ユニーク枚数も推定
 
-  - 共通設定（SELECT_MODE / フルシャッフル / ZIP）→ サイズ → 配置（簡易）→ 方向（必要時）→ 最適化（任意）
+  - 共通設定（SELECT_MODE／フルシャッフル／ZIP）→ サイズ → 配置（簡易）→ 方向（必要時）→ 最適化（任意）
   - フルシャッフルONなら、配置（簡易）や最適化の質問はスキップ
 
-  - DEFAULT_LANG を "ja" / "en" に変更すると UI 表示が切り替わります。
-  - ただし「説明コメント」は要望どおり日本語に統一しています（UIの英語表示は辞書側）。
+  - DEFAULT_LANG を "ja"／"en" に変更すると UI 表示が切り替わります。
 
 対応コア
 --------
-同じフォルダにある `kana_wallpaper_unified_final*.py` を自動検出して読み込みます。
-複数ある場合は「v番号が大きいもの」を優先します。
-
-備考
-----
-本体側の変数名が版によって微妙に変わることがあるため、
-このランチャーは互換のために「複数の候補名」を同時にセットします。
-（存在しない変数でも setattr で追加されるだけで、本体が参照しなければ影響はありません）
+同じフォルダにある `kana_wallpaper_unified_final.py` を読み込みます。
 """
+
 
 from __future__ import annotations
 
@@ -64,14 +55,14 @@ sys.dont_write_bytecode = True  # __pycache__ を作らない
 # 表示言語（"ja" or "en"）
 DEFAULT_LANG = "ja"
 
-# プリセット保存先（None の場合はOSの temp に自動）
-# 例）PRESET_FILE = r"C:\\kana_wallpaper_presets.json"
+# プリセット保存先（None の場合はOSの一時フォルダに自動）
+# 例）PRESET_FILE = r".\\kana_wallpaper_presets.json"  # このフォルダに保存（内容にはパスが入ることがあります）
 PRESET_FILE: Optional[str] = None
 
 # 環境変数での上書き（あれば優先）
 ENV_PRESET_FILE = "KANA_WALLPAPER_PRESET_FILE"
 
-# プリセットの保存ファイル名（temp 利用時）
+# プリセットの保存ファイル名（一時フォルダ利用時）
 DEFAULT_PRESET_BASENAME = "kana_wallpaper_presets.json"
 
 
@@ -148,7 +139,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "msg_choose": "候補番号（または候補文字列）で選択してください。",
         "msg_enter_number": "数値を入力してください。",
         "msg_range": "{min_v}〜{max_v} の範囲で入力してください。",
-        "err_no_core": "本体ファイルが見つかりません。kana_wallpaper_unified_final*.py を同じフォルダに置いてください。",
+        "err_no_core": "本体ファイルが見つかりません。kana_wallpaper_unified_final.py を同じフォルダに置いてください。",
         "err_core_load": "本体のロードに失敗: {path}",
     },
     "en": {
@@ -215,11 +206,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
         "back": "Back",
 
-        # Generic messages
+        # 汎用メッセージ
         "msg_choose": "Please select by number (or enter the exact option string).",
         "msg_enter_number": "Please enter a number.",
         "msg_range": "Please enter a value between {min_v} and {max_v}.",
-        "err_no_core": "Core file not found. Put kana_wallpaper_unified_final*.py in the same folder.",
+        "err_no_core": "本体ファイルが見つかりません。kana_wallpaper_unified_final.py を同じフォルダに置いてください。",
         "err_core_load": "Failed to load core: {path}",
     },
 }
@@ -261,7 +252,7 @@ def ask_choice(label: str, choices: List[str], default_index: int = 1, allow_bac
     opts = list(choices)
     back_label = tr("back")
 
-    # default は通常選択肢の範囲に丸める
+    # 既定値は通常選択肢の範囲に丸める
     if default_index < 1 or default_index > len(opts):
         default_index = 1
 
@@ -355,7 +346,7 @@ def ask_text(label: str, default: str = "", allow_back: bool = False):
 
 
 def _default_temp_dir() -> Path:
-    # Windows: TEMP/TMP、その他: /tmp 等
+    # Windows: TEMP/TMP、その他: /tmp など
     for k in ("TEMP", "TMP"):
         v = os.environ.get(k)
         if v:
@@ -475,39 +466,42 @@ def find_preset_by_name(presets: List[Dict[str, Any]], name: str) -> Optional[in
 
 
 # =============================================================================
-# Core のロード
+# 本体（core）のロード
 # =============================================================================
 
 
 def load_core_module(core_path: Path):
-    spec = importlib.util.spec_from_file_location("kana_wallpaper_core", str(core_path))
+    # 注:
+    # ランチャーは core を importlib で読み込みます。
+    # ProcessPool（Windows spawn）で ワーカー（worker）を使う場合、関数の __module__ が import 可能である必要があるため、
+    # 固定名（kana_wallpaper_core）ではなく、実ファイル名（stem）を モジュール名に採用します。
+    core_path = core_path.resolve()
+    core_dir = str(core_path.parent)
+    if core_dir not in sys.path:
+        sys.path.insert(0, core_dir)
+
+    module_name = core_path.stem
+    # モジュール名として使える識別子に整形
+    module_name = re.sub(r"\W", "_", module_name)
+    if re.match(r"^\d", module_name):
+        module_name = "_" + module_name
+
+    spec = importlib.util.spec_from_file_location(module_name, str(core_path))
     if not spec or not spec.loader:
         raise RuntimeError(tr("err_core_load").format(path=str(core_path)))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore
+    # __module__ 参照が解決できるように sys.modules に登録
+    sys.modules[module_name] = mod
+    spec.loader.exec_module(mod)   # type: ignore（型チェック用）
     return mod
 
 
-_RE_VNUM = re.compile(r"_v(\d+)")
-
-
-def _extract_vnum(name: str) -> int:
-    m = _RE_VNUM.search(name)
-    if not m:
-        return -1
-    try:
-        return int(m.group(1))
-    except Exception:
-        return -1
-
-
 def pick_core_file(here: Path) -> Path:
-    """同フォルダの unified_final 系を自動選択（v番号が大きいもの優先）。"""
-    candidates = [p for p in here.glob("kana_wallpaper_unified_final*.py") if "launcher" not in p.name]
-    if not candidates:
+    """同じフォルダの kana_wallpaper_unified_final.py を選択します。"""
+    core = here / "kana_wallpaper_unified_final.py"
+    if not core.exists():
         raise FileNotFoundError(tr("err_no_core"))
-    candidates.sort(key=lambda p: (_extract_vnum(p.name), p.stat().st_mtime), reverse=True)
-    return candidates[0]
+    return core
 
 
 def set_if(mod: Any, name: str, value: Any) -> None:
@@ -640,9 +634,9 @@ def _get_step_keys(cfg: Dict[str, Any]) -> List[str]:
 
         keys += ["opt_extra"]
         if str(cfg.get("opt_mode", "default")) == "tune":
-                keys += ["steps"]  # reheats is asked immediately after steps
-                if layout.startswith("mosaic"):
-                    keys += ["k"]
+            keys += ["steps"]  # reheats（再加熱）は steps の直後に質問する
+            if layout.startswith("mosaic"):
+                keys += ["k"]
 
     return keys
 
@@ -717,7 +711,7 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
     cfg.setdefault("reheats", int(d.get("reheats", 2)))
     cfg.setdefault("k", int(d.get("k", 8)))
 
-        # 既存値からの派生値を先に整形（mosaic 推定など）
+    # 既存値からの派生値を先に整形（mosaic 推定など）
     _recalc_derived(cfg, core_aspect)
 
     idx = 0
@@ -744,7 +738,7 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
                 return BACK_TOKEN
             cfg["layout"] = str(chosen)
 
-            # random のデフォルト候補
+            # random（ランダムレイアウト）の既定候補
             if cfg["layout"] == "random":
                 cfg.setdefault("random_candidates", list(d.get("random_candidates", ["grid", "hex", "mosaic-uniform-height", "mosaic-uniform-width"])))
 
@@ -846,11 +840,14 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
                 idx -= 1
                 continue
             if bool(v):
+                # 調整する（最適化を実行）
                 cfg["opt_mode"] = "tune"
                 cfg["opt_enable"] = True
             else:
+                # デフォルト（高速・最適化なし）
+                # プリセット由来の opt_enable を残すと「OFFを選んだのに最適化が走る」ため必ずOFFにする
                 cfg["opt_mode"] = "default"
-                cfg["opt_enable"] = bool(d.get("opt_enable", False))
+                cfg["opt_enable"] = False
             idx += 1
             continue
 
@@ -861,18 +858,18 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
                 idx -= 1
                 continue
             cfg["steps"] = int(v)
-            # Ask reheats immediately after steps (so any time steps is asked, reheats is also asked)
+            # steps を訊いた直後に reheats も続けて訊く（質問の流れを一定にするため）
             while True:
                 dv_r = int(cfg.get("reheats", d.get("reheats", 2)))
-                # reheats has a valid value 0, so we use a choice menu to avoid conflict with Back(0)
+                # reheats は 0 も有効値のため、Back(0) と衝突しないよう選択メニューにする
                 choices_r = [str(i) for i in range(0, 7)]
                 default_index_r = min(max(dv_r, 0), 6) + 1
                 sel_r = ask_choice(tr("reheats"), choices_r, default_index=default_index_r, allow_back=True)
                 if sel_r == BACK_TOKEN:
-                    # go back to steps input
+                    # steps 入力へ戻る
                     break
                 cfg["reheats"] = int(sel_r)
-                # proceed to next step
+                # 次のステップへ進む
                 sel_r = None
                 break
             if sel_r == BACK_TOKEN:
@@ -880,8 +877,8 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
             idx += 1
             continue
 
-        # reheats is asked inline right after steps to keep prompts consistent
-        # (this separate step is kept unused for backward safety)
+        # reheats は steps の直後にインラインで質問して流れを統一する
+        # （この単独ステップは互換のため残すが、通常は使わない）
         if key == "reheats":
             idx += 1
             continue
@@ -908,7 +905,7 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
     return cfg
 
 def _profile_to_int(profile: str) -> int:
-    # 1:diagonal 2:hilbert 3:scatter
+    # profile の番号（1=diagonal／2=hilbert／3=scatter）
     return {"diagonal": 1, "hilbert": 2, "scatter": 3}.get(profile, 1)
 
 
@@ -931,7 +928,7 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
     reheats = int(cfg.get("reheats", 2))
     k = int(cfg.get("k", 8))
 
-    # D&D 入力を本体へ渡す（互換のため複数名）
+    # ドラッグ＆ドロップ入力を本体へ渡す（互換のため複数名）
     if dd_paths:
         set_many(mod, ["SCAN_ROOTS", "SCAN_DIRS", "INPUT_PATHS", "INPUT_ROOTS", "DEFAULT_FOLDERS"], dd_paths)
 
@@ -961,7 +958,7 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
         set_many(mod, ["COUNT"], int(cfg.get("count", r * c)))
         set_many(mod, ["MOSAIC_USE_ROWS_COLS", "MOSAIC_FIXED_ROWS_COLS"], True)
     else:
-        # random
+        # random（ランダムレイアウト）
         cand = cfg.get("random_candidates")
         if isinstance(cand, list) and cand:
             set_many(mod, ["RANDOM_LAYOUT_CANDIDATES", "RANDOM_LAYOUTS"], cand)
@@ -969,7 +966,7 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
     # フルシャッフルONなら配置・最適化はOFF方向へ
     if full_shuffle:
         # 「完全ランダム」は ARRANGE_FULL_SHUFFLE で担保するため、
-        # 各レイアウトの POST/最適化（グラデーション/散らし/焼きなまし等）は明示的に無効化します。
+        # 各レイアウトの後処理／最適化（グラデーション／散らし／焼きなまし等）は明示的に無効化します。
         set_many(mod, ["MOSAIC_ENHANCE_ENABLE", "GRID_ENHANCE_ENABLE", "HEX_ENHANCE_ENABLE"], False)
         set_many(mod, ["MOSAIC_LOCAL_OPT_ENABLE", "GRID_ANNEAL_ENABLE", "HEX_ANNEAL_ENABLE"], False)
         # core(v5+) では hex が mosaic の順序を継承しないよう明示（フルシャッフル尊重）
@@ -981,7 +978,7 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
     p_int = _profile_to_int(str(profile))
     d_int = _diag_to_int(str(diag_dir))
 
-    # Objective（scatter は maximize、gradient は minimize を基本）
+    # 目的（scatter は maximize／gradient は minimize を基本）
     neighbor_obj = "min"
     if profile == "scatter":
         neighbor_obj = "max"
@@ -1001,10 +998,10 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
         set_many(mod, ["GRID_ENHANCE_ENABLE"], True)
         set_many(mod, ["GRID_ENHANCE_PROFILE"], str(profile))
         set_many(mod, ["GRID_NEIGHBOR_OBJECTIVE", "GRID_OBJECTIVE"], neighbor_obj)
-        # grid: base arrangement profile -> optimizer
-        #  - diagonal: spectral-diagonal
-        #  - hilbert : spectral-hilbert
-        #  - scatter : checkerboard-ish
+        # grid: 配置プロファイル → optimizer への対応
+        #  - diagonal: spectral-diagonal（対角グラデ）
+        #  - hilbert : spectral-hilbert（ヒルベルト）
+        #  - scatter : checkerboard 風（散らし）
         if profile == "scatter":
             set_many(mod, ["GRID_OPTIMIZER"], "checkerboard")
         elif profile == "diagonal":
@@ -1013,16 +1010,16 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
             set_many(mod, ["GRID_OPTIMIZER"], "spectral-hilbert")
     elif layout == "hex":
         set_many(mod, ["HEX_GRAD_PROFILE", "HEX_PROFILE"], p_int)
-        set_many(mod, ["HEX_DIAG_DIR", "HEX_DIAGONAL_DIR"], d_int)
-        set_many(mod, ["HEX_DIAGONAL_DIRECTION"], str(diag_dir))
+        set_many(mod, ["HEX_DIAGONAL_DIR"], d_int)
+        set_many(mod, ["HEX_DIAG_DIR", "HEX_DIAGONAL_DIRECTION"], str(diag_dir))
         set_many(mod, ["HEX_ENHANCE_ENABLE"], True)
         set_many(mod, ["HEX_ENHANCE_PROFILE"], str(profile))
         set_many(mod, ["HEX_NEIGHBOR_OBJECTIVE", "HEX_OBJECTIVE"], neighbor_obj)
 
-        # core(v5+) 用: hex の global/local 最適化を明示（scatter は maximize）
-        #  - HEX_GLOBAL_ORDER: inherit/none/spectral-hilbert/spectral-diagonal/checkerboard/anneal
-        #  - HEX_GLOBAL_OBJECTIVE: min/max
-        #  - HEX_LOCAL_OPT_OBJECTIVE: min/max
+        # core(v5+) 用: hex の global/local 最適化を明示（scatter は max）
+        #  - HEX_GLOBAL_ORDER: inherit／none／spectral-hilbert／spectral-diagonal／checkerboard／anneal
+        #  - HEX_GLOBAL_OBJECTIVE: min／max
+        #  - HEX_LOCAL_OPT_OBJECTIVE: min／max
         if profile == "scatter":
             set_many(mod, ["HEX_GLOBAL_ORDER"], "checkerboard")
             set_many(mod, ["HEX_GLOBAL_OBJECTIVE"], "max")
@@ -1039,9 +1036,6 @@ def apply_config_to_core(mod: Any, cfg: Dict[str, Any], dd_paths: List[str]) -> 
             set_many(mod, ["HEX_GLOBAL_ORDER"], "none")
             set_many(mod, ["HEX_GLOBAL_OBJECTIVE"], "min")
             set_many(mod, ["HEX_LOCAL_OPT_OBJECTIVE"], "min")
-
-        # diagonal の方向は新変数（文字列）にも入れておく
-        set_many(mod, ["HEX_DIAG_DIR"], str(diag_dir))
 
     # 最適化（任意）
     if opt_enable:
