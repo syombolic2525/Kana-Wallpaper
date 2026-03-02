@@ -65,7 +65,7 @@
 ---
 ## ファイル構成
 
-### スクリプト（例：最新版）
+### スクリプト
 - 本体（core）: `kana_wallpaper_unified_final.py`
 - ランチャー（launcher）: `kana_wallpaper_launcher.py`
 - ワンクリック実行（Windows）: `RUN_KANA_WALLPAPER_ONECLICK.bat`
