@@ -1,5 +1,11 @@
 # Kana Wallpaper - Unified FINAL
 
+**JP / EN**: [日本語](#日本語) | [English](#english)
+
+---
+
+# 日本語
+
 画像フォルダ / アーカイブ / 動画（フレーム抽出）から複数枚を集め、**grid / hex / mosaic（uniform-height, uniform-width）/ quilt / stained-glass** などのレイアウトで  
 **1枚の壁紙画像（PNG/JPG）**を生成します。Windows環境では必要なら生成後に壁紙へ設定することもできます。  
 迷ったら **ランチャー（launcher）** を起動して、質問に答えるだけでOKです。
@@ -273,3 +279,280 @@ YOLOをGPUで使うには、PyTorchをGPU版で入れる必要があります（
 
 2026-01-09
 - 公開
+
+---
+
+# English
+
+Kana Wallpaper generates a **single wallpaper image (PNG/JPG)** by selecting many images from **folders / archives / videos (frame extraction)** and arranging them with layouts such as **grid / hex / mosaic (uniform-height, uniform-width) / quilt / stained-glass**.
+
+If you are unsure, run the **launcher** and answer the prompts.
+
+---
+
+## Table of contents
+- [Sample outputs](#sample-outputs)
+- [File layout](#file-layout)
+- [Quick start](#quick-start)
+- [One-click GPU setup (Windows recommended)](#one-click-gpu-setup-windows-recommended)
+- [Key features](#key-features)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Usage (basic)](#usage-basic)
+- [AI face detection (optional)](#ai-face-detection-optional)
+- [Video frame extraction (optional)](#video-frame-extraction-optional)
+- [Generated files (non-image) and locations](#generated-files-non-image-and-locations)
+- [Terms](#terms)
+- [Changelog](#changelog)
+
+---
+
+## Sample outputs
+
+### grid
+<img src="docs/grid.jpg" alt="grid layout sample" width="900">
+
+<details>
+<summary>More samples (click to expand)</summary>
+
+<p>
+  <b>hex</b><br>
+  <img src="docs/hex.jpg" alt="hex layout sample" width="900">
+</p>
+
+<p>
+  <b>mosaic-uniform-height</b><br>
+  <img src="docs/mosaic-uniform-height.jpg" alt="mosaic uniform-height sample" width="900">
+</p>
+
+<p>
+  <b>mosaic-uniform-width</b><br>
+  <img src="docs/mosaic-uniform-width.jpg" alt="mosaic uniform-width sample" width="900">
+</p>
+
+<p>
+  <b>quilt</b><br>
+  <img src="docs/quilt.jpg" alt="quilt sample" width="900">
+</p>
+
+<p>
+  <b>stained-glass</b><br>
+  <img src="docs/stained-glass.jpg" alt="stained-glass sample" width="900">
+</p>
+
+</details>
+
+---
+
+## File layout
+
+### Scripts
+- core: `kana_wallpaper_unified_final.py`
+- launcher: `kana_wallpaper_launcher.py`
+- one-click run (Windows): `RUN_KANA_WALLPAPER_ONECLICK.bat`
+- one-click setup: `kana_wallpaper_env_setup.py`
+- this doc: `README.md`
+
+### Dependencies
+- required: `requirements.txt`
+- optional: `requirements-optional.txt`
+
+### Auto-generated (created automatically)
+- `_kana_state/` (default output folder; created automatically if missing)
+  - `models/` (AI model files)
+  - `kana_wallpaper_presets.json` / `kana_wallpaper_last_run.json`, etc.
+
+---
+
+## Quick start
+
+### 1) Install dependencies
+```bash
+pip install -r requirements.txt
+# Optional features (as needed)
+pip install -r requirements-optional.txt
+```
+
+### 2) Run the launcher (recommended)
+```bash
+python kana_wallpaper_launcher.py
+```
+
+---
+
+## One-click GPU setup (Windows recommended)
+
+To make heavy features (AI face detection, stained-glass facefit, etc.) easier to run with **YOLO on GPU**, this repository includes two “one-click” files:
+
+- `RUN_KANA_WALLPAPER_ONECLICK.bat` (double-click)
+- `kana_wallpaper_env_setup.py` (creates venv, installs deps, downloads models)
+
+### Easiest way
+1. On Windows, **double-click** `RUN_KANA_WALLPAPER_ONECLICK.bat`
+2. First run will automatically:
+   - create `.venv/` and install packages (Pillow / numpy / OpenCV / ultralytics, etc.)
+   - auto-detect GPU and install PyTorch (CUDA build if NVIDIA is detected; otherwise CPU)
+   - prepare `_kana_state/models/` (auto-download missing models)
+     - YuNet / AnimeFace cascade
+     - YOLO weights (`yolov8x6_animeface.pt`)
+
+`RUN_KANA_WALLPAPER_ONECLICK.bat` will **automatically download missing models** under `_kana_state/models/` (including YOLO weights).
+3. After setup, it launches `kana_wallpaper_launcher.py` using the venv Python.
+
+### Manual run
+```bash
+python kana_wallpaper_env_setup.py --download-models --download-yolo
+```
+
+Options:
+- `--gpu cuda|cpu|directml|auto` (default: auto)
+- `--download-models` (YuNet + AnimeFace)
+- `--download-yolo` (YOLO weights; large file. Use when you want to be explicit in manual runs)
+
+> Note: models and caches are stored under `_kana_state/`. Do not commit this folder to a public repository.
+
+---
+
+## Key features
+
+### Input sources
+- folders (recursive scan supported)
+- archives (zip/7z/rar; depends on environment/settings)
+- videos (frame extraction via ffmpeg/ffprobe)
+
+### Layouts
+- grid
+- mosaic-uniform-height / mosaic-uniform-width
+- hex
+- quilt (patchwork-style split/merge rectangles)
+- stained-glass (stained-glass style pieces/borders/warping, etc.)
+- random (pick from candidate layouts)
+
+### Ordering / optimization (optional)
+- ordering: spectral / hilbert / diagonal / checkerboard, etc.
+- optimization: anneal (simulated annealing), etc.
+
+### Face focus (optional)
+- heuristic (lightweight)
+- AI (YOLO / YuNet / AnimeFace)
+  - YOLO supports GPU (requires PyTorch)
+
+### Effects (optional)
+- light (bloom/halation, etc.)
+- color (grading/LUT, etc.)
+- detail (sharpen/NR, etc.)
+- finishing (grain/vignette, etc.)
+- brightness (auto/hybrid, etc.)
+
+---
+
+## Requirements
+- Python 3.9+
+- Pillow (required)
+- numpy (required)
+
+Optional:
+- opencv-python (face detection / some features)
+- ultralytics (YOLO; requires PyTorch separately)
+- py7zr / rarfile (Python-side 7z/rar support)
+- ffmpeg / ffprobe (video frame extraction)
+
+---
+
+## Install
+```bash
+pip install -r requirements.txt
+# Optional features
+pip install -r requirements-optional.txt
+```
+
+---
+
+## Usage (basic)
+
+### Launcher (recommended)
+1. Place core and launcher in the same folder  
+2. Run the launcher  
+3. Answer prompts to generate a wallpaper image
+
+Note: On double-click launch, the default scan folder is `./images` (Windows: `.\images`). If it does not exist, use drag & drop or CLI.
+
+### Core (CLI)
+```bash
+py -3 kana_wallpaper_unified_final.py .\images
+```
+
+---
+
+## AI face detection (optional)
+
+### Default model folder
+Put models under **`_kana_state/models/`** (created automatically if missing).
+
+Examples:
+- YOLO: `yolov8x6_animeface.pt`
+- YuNet: `face_detection_yunet_2023mar.onnx`
+- AnimeFace: `lbpcascade_animeface.xml`
+
+### YOLO (GPU)
+To use YOLO on GPU, install a GPU-enabled PyTorch build for your environment (OS/CUDA/Python), then install `requirements-optional_FULL_no_torch.txt` (recommended).
+
+---
+
+## Video frame extraction (optional)
+
+- Extract frames from videos and mix them with images in layouts.
+- Extraction modes include `random / uniform / scene / scene_best / best_*` (configurable in the launcher).
+- `ffmpeg` / `ffprobe` is required (PATH or configured paths).
+
+Frame cache is stored by default under `_kana_state/kana_wallpaper_video_frames_cache/`.
+
+---
+
+## Generated files (non-image) and locations
+
+Default storage is **`_kana_state/`**.
+
+### 1) Near-duplicate cache (dHash)
+- `kana_wallpaper.dhash_cache.json`  
+  - Used for near-duplicate detection. Safe to delete (will be rebuilt).
+  - **Note:** file paths (including archive member paths) may be stored.
+
+### 2) Used image list / metadata (default ON)
+- `kana_wallpaper_used_images.csv`
+- `kana_wallpaper_used_images.txt`
+- `kana_wallpaper_meta.json`
+  - Stores the list/conditions for the most recent run.
+  - **Note:** may include absolute paths and archive member paths. Do not commit.
+
+### 3) Launcher files
+- `kana_wallpaper_presets.json` (presets)
+- `kana_wallpaper_last_run.json` (last run)
+- `kana_wallpaper_launcher_export.json` (launcher → core)
+
+### 4) Continuous output folders
+- `continuous_YYYYmmdd_HHMMSS/`  
+  - Created for continuous output runs; stores generated images.
+
+---
+
+## Terms
+- Modifying/customizing is allowed.
+- Commercial use is not permitted.
+- No warranty. Use at your own risk.
+
+---
+
+## Changelog
+2026-03-02
+- Consolidated outputs/caches/presets/models under `_kana_state/`
+- Added/updated: quilt, stained-glass, video frame extraction, AI face detection (YOLO/YuNet/AnimeFace)
+- Requirements cleanup
+
+2026-01-13
+- Added multithreading for speed
+- Stability fixes
+
+2026-01-09
+- Initial release
+
