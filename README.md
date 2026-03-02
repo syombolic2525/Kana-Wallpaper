@@ -1,13 +1,8 @@
 # Kana Wallpaper - Unified FINAL
 
 画像フォルダ / アーカイブ / 動画（フレーム抽出）から複数枚を集め、**grid / hex / mosaic（uniform-height, uniform-width）/ quilt / stained-glass** などのレイアウトで  
-**1枚の壁紙画像（PNG/JPG）**を生成します。Windows環境では必要なら生成後に壁紙へ設定することもできます。
-
----
-
-## これは何？
-- 画像をタイル状に並べて、**1枚の壁紙画像**を生成するツールです。
-- 迷ったら **ランチャー（launcher）** を起動して、質問に答えるだけでOKです。
+**1枚の壁紙画像（PNG/JPG）**を生成します。Windows環境では必要なら生成後に壁紙へ設定することもできます。  
+迷ったら **ランチャー（launcher）** を起動して、質問に答えるだけでOKです。
 
 ---
 
