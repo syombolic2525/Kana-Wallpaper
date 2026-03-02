@@ -332,7 +332,7 @@ ImageRef = Union[Path, str]
 # - 相対パスは「このスクリプトの場所」基準です
 # =============================================================================
 DEFAULT_TARGET_DIRS = [
-    (r".\\AI_images" if os.name == "nt" else r"./AI_images"),
+    (r".\\images" if os.name == "nt" else r"./images"),
 ]
 
 
