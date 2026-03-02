@@ -193,11 +193,11 @@ pip install -r requirements-optional.txt
 2. ランチャーを起動  
 3. 質問に答えると壁紙画像を生成します
 
-※ダブルクリック起動時の既定探索先は `./AI_images`（Windows: `.\AI_images`）です。フォルダが無い場合はドラッグ＆ドロップ/CLI推奨。
+※ダブルクリック起動時の既定探索先は `./images`（Windows: `.\images`）です。フォルダが無い場合はドラッグ＆ドロップ/CLI推奨。
 
 ### core（CLI）
 ```bash
-py -3 kana_wallpaper_unified_final.py .\AI_images
+py -3 kana_wallpaper_unified_final.py .\images
 ```
 
 ---
