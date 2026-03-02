@@ -1,3 +1,13 @@
-# requirements-optional.txt（任意）
-numpy>=1.23.0
+# Optional dependencies (install if you need the related features)
+
+# Image / vision (YuNet, general CV helpers)
 opencv-python>=4.8.0
+
+# YOLO anime-face backend (optional; requires PyTorch)
+ultralytics>=8.0.0
+torch
+torchvision
+
+# Archive readers (optional; enables handling 7z/rar via Python libraries when available)
+py7zr>=0.20.0
+rarfile>=4.0
