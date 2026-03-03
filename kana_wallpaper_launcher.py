@@ -17,9 +17,6 @@ Kana Wallpaper - Unified FINAL（ランチャー / launcher）
 注意（個人情報）
 - プリセット/前回設定/キャッシュには、画像やLUTのパスが保存される場合があります。
 - これらは既定で「このランチャーと同じ場所/_kana_state」に保存されます。
-- 公開リポジトリへコミットしないよう、.gitignore の利用を推奨します。
-
-更新日: 2026-02-28
 """
 
 
@@ -315,9 +312,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "seed_same_na": "前回と同じ（未取得）",
         "seed_specify": "数値で指定",
         "seed_value": "seed（整数）",
-        "mode_last": "前回の設定で開始",
+        "mode_last": "上記の設定で開始",
         "last_action": "前回の設定で",
-        "last_summary": "前回: {summary}",
+        "last_summary": "{summary}",
         "effects_summary": "エフェクト: {summary}",
         "last_effects_summary": "前回エフェクト: {summary}",
         "summary_title": "サマリ",
@@ -404,6 +401,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "preset_action": "このプリセットで",
         "preset_action_run": "このまま実行",
         "preset_action_edit": "編集してから実行",
+        "preset_action_load_to_top": "編集（プリセット読込→トップへ）",
         "preset_action_back": "戻る",
         "preset_apply_mode": "プリセット適用",
         "preset_apply_all": "全部適用（レイアウト＋エフェクト）",
@@ -414,6 +412,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "preset_action_run_no_wallpaper": "壁紙に設定しないで実行",
         "preset_action_repeat": "連続出力（連番保存）",
         "repeat_count_prompt": "連続出力回数（0=無限）",
+        "apply_wallpaper_prompt": "壁紙に設定する？",
+        "apply_wallpaper_yes": "設定する",
+        "apply_wallpaper_no": "設定しない",
         "repeat_apply_wallpaper_prompt": "連続出力中も壁紙に設定する？",
         "repeat_wallpaper_on": "設定する",
         "repeat_wallpaper_off": "設定しない",
@@ -437,7 +438,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "msg_choose": "候補番号（または候補文字列）で選択してください。",
         "msg_enter_number": "数値を入力してください。",
         "msg_range": "{min_v}〜{max_v} の範囲で入力してください。",
-        "err_no_core": "本体ファイルが見つかりません。kana_wallpaper_unified_final.py を同じフォルダに置いてください（_v番号が大きいものを優先します）。",
+        "err_no_core": "本体ファイルが見つかりません。kana_wallpaper_unified_final*.py を同じフォルダに置いてください（_v番号が大きいものを優先します）。",
         "err_core_load": "本体のロードに失敗: {path}",
         "err_no_entry": "本体に main() / run() が見つかりません。",
         "bling_mode": "派手派手Unicodeモード（UI_STYLE + UNICODE_BLING）",
@@ -475,9 +476,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "mode_random_preset": "Start with random preset",
         "mode_manage_presets": "Manage presets",
         "mode_effects": "Effects settings",
-        "mode_last": "Start with last settings",
+        "mode_last": "Start with these settings",
         "last_action": "With last settings",
-        "last_summary": "Last: {summary}",
+        "last_summary": "{summary}",
         "effects_summary": "Effects: {summary}",
         "last_effects_summary": "Last effects: {summary}",
         "summary_title": "Summary",
@@ -560,6 +561,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "preset_action": "With this preset",
         "preset_action_run": "Run as-is",
         "preset_action_edit": "Edit then run",
+        "preset_action_load_to_top": "Load preset and return to main menu",
         "preset_action_back": "Back",
         "preset_apply_mode": "Apply preset",
         "preset_apply_all": "Apply layout + effects",
@@ -570,6 +572,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "preset_action_run_no_wallpaper": "Run without setting wallpaper",
         "preset_action_repeat": "Continuous output (numbered)",
         "repeat_count_prompt": "How many outputs (0=infinite)",
+        "apply_wallpaper_prompt": "Set this as your wallpaper?",
+        "apply_wallpaper_yes": "Yes",
+        "apply_wallpaper_no": "No",
         "repeat_apply_wallpaper_prompt": "Apply wallpaper during continuous output?",
         "repeat_wallpaper_on": "Yes",
         "repeat_wallpaper_off": "No",
@@ -593,7 +598,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "msg_choose": "Please select by number (or enter the exact option string).",
         "msg_enter_number": "Please enter a number.",
         "msg_range": "Please enter a value between {min_v} and {max_v}.",
-        "err_no_core": "Core file not found. Put kana_wallpaper_unified_final.py in the same folder (highest _v number wins).",
+        "err_no_core": "Core file not found. Put kana_wallpaper_unified_final*.py in the same folder (highest _v number wins).",
         "err_core_load": "Failed to load core: {path}",
         "err_no_entry": "Could not find main() / run() entry point in core module.",
         "face_ai_enable": "Use AI for face-focus (fast/accurate)",
@@ -1102,9 +1107,6 @@ def ask_choice(label: str, choices: List[Union[str, Tuple[str, str]]], default_i
     prompt = f"{label} [{default_index}]: "
 
     sys.stdout.flush()
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
-
     while True:
         sys.stdout.flush()
         raw = input(prompt).strip()
@@ -1155,9 +1157,6 @@ def ask_int(label: str, default: int, min_v: int, max_v: int, allow_back: bool =
             print(f"  [b] {tr('back')}")
         else:
             print(f"  [0] {tr('back')}")
-
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
 
     while True:
         raw = input(prompt).strip()
@@ -1304,8 +1303,6 @@ def ask_float(label: str, default: float, min_v: float, max_v: float, allow_back
       - しかし 0.0 が有効値の入力（例: lead alpha）では困るので、
         min_v..max_v に 0.0 が含まれる場合は “戻る” を b/back/戻る で受け付けます。
     """
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
 
     zero_is_value = (float(min_v) <= 0.0 <= float(max_v))
 
@@ -1881,6 +1878,131 @@ def preset_summary(cfg: Dict[str, Any], include_fx: bool = True) -> str:
     return " | ".join(parts)
 
 
+
+def preset_summary_verbose_lines(cfg: Dict[str, Any]) -> List[str]:
+    """前回表示用：できるだけ詳細なサマリを複数行で生成する。
+
+    - 既存の preset_summary() は「短め」なので、メインメニューの「前回:」表示ではこちらを使う。
+    - ここでは“簡略化しすぎない”ことを優先し、主要パラメータをなるべく落とさず表示する。
+    """
+    try:
+        cfg = _normalize_cfg_archives(cfg)
+    except Exception:
+        pass
+
+    def _onoff(v: Any) -> str:
+        return tr('on') if bool(v) else tr('off')
+
+    out_lines: List[str] = []
+
+    # 1行目：出力サイズ / レイアウト / 選別 / 代表パラメータ
+    t0: List[str] = []
+    w = cfg.get('width', None)
+    h = cfg.get('height', None)
+    if isinstance(w, int) and isinstance(h, int) and (w > 0) and (h > 0):
+        t0.append(f"out={w}x{h}")
+
+    layout = str(cfg.get('layout', '?'))
+    if layout == 'grid':
+        r = cfg.get('rows')
+        c = cfg.get('cols')
+        if r and c:
+            t0.append(f"layout=grid({r}x{c})")
+        else:
+            t0.append("layout=grid")
+    elif layout == 'hex':
+        orient = cfg.get('hex_orient')
+        t0.append(f"layout=hex({orient})" if orient else "layout=hex")
+    else:
+        t0.append(f"layout={layout}")
+
+    count = cfg.get('count', None)
+    if isinstance(count, int) and count > 0:
+        t0.append(f"count={count}")
+
+    sel = cfg.get('select_mode', None)
+    if sel:
+        t0.append(f"select={sel}")
+
+    prof = cfg.get('profile', None)
+    if prof:
+        t0.append(f"place={prof}")
+
+    if bool(cfg.get('full_shuffle', False)):
+        t0.append("full_shuffle=ON")
+    elif bool(cfg.get('preserve_input_order', False)):
+        t0.append("preserve=ON")
+
+    if t0:
+        out_lines.append(" | ".join(t0))
+
+    # 2行目：最適化 / アーカイブ / 主要ON/OFF
+    t1: List[str] = []
+
+    opt_mode = str(cfg.get("opt_mode", "") or "").strip().lower()
+    steps = cfg.get("steps")
+    reheats = cfg.get("reheats")
+    opt_on = bool(cfg.get("opt_enable")) or (opt_mode in ("tune", "on", "anneal"))
+    if opt_on:
+        if (steps is not None) and (reheats is not None):
+            t1.append(f"opt=anneal({steps}x{reheats})")
+        elif steps is not None:
+            t1.append(f"opt=steps={steps}")
+        elif reheats is not None:
+            t1.append(f"opt=reheats={reheats}")
+        else:
+            t1.append("opt=ON")
+        if cfg.get("k") is not None:
+            t1.append(f"k={cfg.get('k')}")
+
+    if ("archives_enable" in cfg) or ("zip_scan_enable" in cfg) or ("zip_scan" in cfg):
+        arch_en = bool(cfg.get("archives_enable", cfg.get("zip_scan_enable", cfg.get("zip_scan", False))))
+        t1.append(f"archives={_onoff(arch_en)}")
+
+    if "video_active" in cfg:
+        t1.append(f"video={_onoff(cfg.get('video_active'))}")
+    if "face_ai_enable" in cfg:
+        t1.append(f"face_ai={_onoff(cfg.get('face_ai_enable'))}")
+    if "set_wallpaper" in cfg:
+        t1.append(f"wallpaper={_onoff(cfg.get('set_wallpaper'))}")
+
+    if t1:
+        out_lines.append(" | ".join(t1))
+
+    # 3行目：動画/顔AIの詳細（有効時のみ）
+    t2: List[str] = []
+    try:
+        if bool(cfg.get("video_active", False)):
+            vmode = cfg.get("video_mode")
+            vsel = cfg.get("video_select_mode")
+            vppv = cfg.get("video_frames_per_video")
+            if vmode:
+                t2.append(f"video_mode={vmode}")
+            if vsel:
+                t2.append(f"video_select={vsel}")
+            if vppv not in (None, 0, "0"):
+                t2.append(f"video_per_video={vppv}")
+            gvt = cfg.get("grid_video_timeline")
+            if gvt:
+                t2.append(f"timeline={gvt}")
+        if bool(cfg.get("face_ai_enable", False)):
+            b = cfg.get("face_ai_backend")
+            d = cfg.get("face_ai_device")
+            s = cfg.get("face_ai_sensitivity")
+            if b:
+                t2.append(f"backend={b}")
+            if d:
+                t2.append(f"dev={d}")
+            if s:
+                t2.append(f"sens={s}")
+    except Exception:
+        pass
+
+    if t2:
+        out_lines.append(" | ".join(t2))
+
+    return out_lines
+
 def find_preset_by_name(presets: List[Dict[str, Any]], name: str) -> Optional[int]:
     for i, p in enumerate(presets):
         if str(p.get("name", "")) == name:
@@ -2141,8 +2263,6 @@ def _manage_presets_common(
     - 設定プリセット/エフェクトプリセットの両方で共通利用
     - 変更したら都度保存（ファイル反映）
     """
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
 
     while True:
         _launcher_banner(title)
@@ -3025,7 +3145,7 @@ def effect_menu(effect_cfg: Dict[str, Any], presets: List[Dict[str, Any]], prese
         while True:
             disp_title = eff_title(title)
             _launcher_banner(disp_title)
-            _launcher_note(uistr("Current: ", "現在: ") + effect_preset_summary(effect_cfg))
+            _launcher_note(effect_preset_summary(effect_cfg))
             disp_choices: List[Tuple[str, str]] = [(c, eff_label(c)) for c in choices]
             sel2 = ask_choice(disp_title, disp_choices, default_index=0, allow_back=True)
             if sel2 == BACK_TOKEN:
@@ -3040,7 +3160,7 @@ def effect_menu(effect_cfg: Dict[str, Any], presets: List[Dict[str, Any]], prese
         """ON になっている項目だけをカテゴリ横断で一覧表示します（省略しない）。"""
         while True:
             _launcher_banner(eff_title('エフェクト: ON項目一覧'))
-            _launcher_note(uistr("Current: ", "現在: ") + effect_preset_summary(effect_cfg))
+            _launcher_note(effect_preset_summary(effect_cfg))
             effects_enable = bool(effect_cfg.get('effects_enable', True))
             if not effects_enable:
                 _launcher_note(uistr("Note: effects=off (global OFF; enabled settings below will not be applied).", "注意: effects=off（全体OFFのため、以下は設定がONでも適用されない）"))
@@ -3182,12 +3302,9 @@ def effect_menu(effect_cfg: Dict[str, Any], presets: List[Dict[str, Any]], prese
             # 編集後は一覧に戻って更新表示
             continue
 
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
-
     while True:
         _launcher_banner(eff_title('エフェクト'))
-        _launcher_note(uistr("Current: ", "現在: ") + effect_preset_summary(effect_cfg))
+        _launcher_note(effect_preset_summary(effect_cfg))
         _launcher_note(f"{uistr('Presets: ', 'プリセット: ')}{preset_path}")
         raw_choices = [
             '全体ON/OFF（ワンタッチ）',
@@ -3360,7 +3477,7 @@ def _collect_core_candidates(dir_path: Path) -> list[Path]:
     """指定フォルダから本体候補を集める（例外は握りつぶして空で返す）。
 
     NOTE:
-      ここは glob が "kana_wallpaper_unified_final.py" なので、ランチャー自体は
+      ここは glob が "kana_wallpaper_unified_final*.py" なので、ランチャー自体は
       そもそも候補に入りません。過去に "launcher" という部分文字列で除外したところ、
       本体側のファイル名に "no_launcher_..." のような語が含まれるケースまで除外してしまい、
       本体が見つからない誤検出になりました。
@@ -3371,7 +3488,7 @@ def _collect_core_candidates(dir_path: Path) -> list[Path]:
     try:
         if not dir_path or (not dir_path.exists()):
             return out
-        for p in dir_path.glob("kana_wallpaper_unified_final.py"):
+        for p in dir_path.glob("kana_wallpaper_unified_final*.py"):
             try:
                 if not p.is_file():
                     continue
@@ -4054,9 +4171,6 @@ def build_config(core_aspect: float, defaults: Optional[Dict[str, Any]] = None, 
             idx = max(0, len(steps0) - 1) if start_at_last else 0
     elif start_at_last and steps0:
         idx = max(0, len(steps0) - 1)
-
-    # プリセット適用の既定（最後に選んだものを覚える）
-    preset_apply_default_all = True
 
     while True:
         steps = _get_step_keys(cfg)
@@ -5605,13 +5719,31 @@ def main() -> None:
     except Exception as e:
         _kana_silent_exc('launcher:L4668', e)
         pass
+
     # プリセット適用の既定（最後に選んだものを覚える）
     preset_apply_default_all = True
 
+    # 壁紙に設定するか（直前の選択を引き継ぐ）
+    last_apply_wallpaper = True
+    try:
+        if isinstance(last_cfg, dict):
+            if 'apply_wallpaper' in last_cfg:
+                last_apply_wallpaper = bool(last_cfg.get('apply_wallpaper'))
+            elif 'set_wallpaper' in last_cfg:
+                last_apply_wallpaper = bool(last_cfg.get('set_wallpaper'))
+            elif 'wallpaper' in last_cfg:
+                last_apply_wallpaper = bool(last_cfg.get('wallpaper'))
+        else:
+            last_apply_wallpaper = bool(getattr(mod, 'APPLY_WALLPAPER', True))
+    except Exception as e:
+        _kana_silent_exc('launcher:last_apply_wallpaper_init', e)
+        last_apply_wallpaper = True
+
+
     while True:
-        # 実行オプション（通常 / 壁紙OFF / 連続出力）
+        # 実行オプション（通常 / 連続出力）
         run_plan = {
-            "apply_wallpaper": True,  # core側へ反映
+            "apply_wallpaper": bool(last_apply_wallpaper),  # core側へ反映
             "continuous": False,
             "repeat_count": 1,         # 0=無限
             # ランダムプリセット開始 + 連続出力のときだけ True になります
@@ -5629,8 +5761,15 @@ def main() -> None:
             # 前回設定 / エフェクトのサマリを再表示する（ただし前回設定フロー内では再表示しない）
             try:
                 if isinstance(last_cfg, dict) and last_cfg:
-                    ls = preset_summary(dict(common_defaults, **dict(last_cfg)), include_fx=False)
-                    _launcher_note(tr('last_summary').format(summary=ls))
+                    _cfg0 = dict(common_defaults, **dict(last_cfg))
+                    _ls_lines = preset_summary_verbose_lines(_cfg0)
+                    if _ls_lines:
+                        _launcher_note(tr('last_summary').format(summary=_ls_lines[0]))
+                        for _it in _ls_lines[1:]:
+                            _launcher_note(_it)
+                    else:
+                        ls = preset_summary(_cfg0, include_fx=False)
+                        _launcher_note(tr('last_summary').format(summary=ls))
                 # 現在のエフェクトを表示（メインメニューの概要確認用）
                 try:
                     es = effect_preset_summary(effect_cfg)
@@ -5842,7 +5981,7 @@ def main() -> None:
                 print(f"（エクスポートでエラー: {e}）")
             continue
 
-        # 前回の設定で開始
+        # 上記の設定で開始
         if isinstance(last_cfg, dict) and last_cfg and mode == tr("mode_last"):
             cfg = dict(last_cfg)
             cfg = dict(common_defaults, **cfg)
@@ -5862,7 +6001,6 @@ def main() -> None:
                 [
                     tr("preset_action_run"),
                     tr("preset_action_edit"),
-                    tr("last_action_run_no_wallpaper"),
                     tr("last_action_repeat"),
                 ],
                 default_index=1,
@@ -5871,28 +6009,11 @@ def main() -> None:
             if act == BACK_TOKEN:
                 cfg = BACK_TOKEN
 
-            elif act == tr("last_action_run_no_wallpaper"):
-                run_plan["apply_wallpaper"] = False
-
             elif act == tr("last_action_repeat"):
                 run_plan["continuous"] = True
-                ap = ask_choice(
-                    tr("repeat_apply_wallpaper_prompt"),
-                    [tr("repeat_wallpaper_on"), tr("repeat_wallpaper_off")],
-                    default_index=2,
-                    allow_back=True,
-                )
-                if ap == BACK_TOKEN:
-                    cfg = BACK_TOKEN
-                else:
-                    run_plan["apply_wallpaper"] = (ap == tr("repeat_wallpaper_on"))
-                    run_plan["repeat_count"] = ask_int(tr("repeat_count_prompt"), 10, 0, 999999, allow_back=True)
+                run_plan["repeat_count"] = ask_int(tr("repeat_count_prompt"), 10, 0, 999999, allow_back=True)
 
 
-                    # ランダムプリセット開始の場合：連続出力のたびに別プリセットを選び直す
-                    if mode == tr("mode_random_preset"):
-                        run_plan["random_preset_each_run"] = True
-                        run_plan["random_preset_pool"] = list(presets) if isinstance(presets, list) else None
             elif act == tr("preset_action_edit"):
                 cfg2 = build_config(aspect, defaults=cfg, start_at_last=False)
                 if cfg2 == BACK_TOKEN:
@@ -5935,14 +6056,12 @@ def main() -> None:
                 # この起動で使うエフェクト設定（常に“現在のエフェクト”）
                 eff_for_run = dict(effect_cfg) if isinstance(effect_cfg, dict) else {}
 
-                # このまま実行 / 設定編集して実行 / エフェクト編集して実行 / 戻る
+                # このまま実行 / 編集（プリセット読込→トップへ） / 連続出力 / 戻る
                 act = ask_choice(
                     tr("preset_action"),
                     [
                         tr("preset_action_run"),
-                        tr("preset_action_edit"),
-                        tr("preset_action_effects"),
-                        tr("preset_action_run_no_wallpaper"),
+                        tr("preset_action_load_to_top"),
                         tr("preset_action_repeat"),
                     ],
                     default_index=1,
@@ -5951,20 +6070,22 @@ def main() -> None:
                 if act == BACK_TOKEN:
                     continue
 
-                if act == tr("preset_action_run_no_wallpaper"):
-                    run_plan["apply_wallpaper"] = False
+                if act == tr("preset_action_load_to_top"):
+                    # プリセットを「前回設定」として読み込み、メインメニューへ戻る
+                    try:
+                        loaded_cfg = dict(cand_layout_cfg) if isinstance(cand_layout_cfg, dict) else {}
+                        # 現在のエフェクト状態は維持（後でエフェクトメニューで編集できます）
+                        if isinstance(effect_cfg, dict):
+                            loaded_cfg.update(dict(effect_cfg))
+                        last_cfg = dict(loaded_cfg)
+                        save_last_run(lpath, last_cfg)
+                    except Exception as e:
+                        _kana_silent_exc('launcher:preset_load_to_top', e)
+                        pass
+                    continue
 
                 elif act == tr("preset_action_repeat"):
                     run_plan["continuous"] = True
-                    ap = ask_choice(
-                        tr("repeat_apply_wallpaper_prompt"),
-                        [tr("repeat_wallpaper_on"), tr("repeat_wallpaper_off")],
-                        default_index=2,
-                        allow_back=True,
-                    )
-                    if ap == BACK_TOKEN:
-                        continue
-                    run_plan["apply_wallpaper"] = (ap == tr("repeat_wallpaper_on"))
                     run_plan["repeat_count"] = ask_int(tr("repeat_count_prompt"), 10, 0, 999999, allow_back=True)
 
                     # ランダムプリセット開始の場合：連続出力のたびに別プリセットを選び直す
@@ -5972,10 +6093,8 @@ def main() -> None:
                         run_plan["random_preset_each_run"] = True
                         run_plan["random_preset_pool"] = list(presets) if isinstance(presets, list) else None
 
-                if (act == tr("preset_action_run")
-                    or act == tr("preset_action_effects")
-                    or act == tr("preset_action_run_no_wallpaper")
-                    or act == tr("preset_action_repeat")):
+
+                if act in (tr("preset_action_run"), tr("preset_action_repeat")):
                     # まずはプリセットのレイアウトを採用
                     cfg = dict(cand_layout_cfg)
                     cfg = dict(common_defaults, **cfg)
@@ -5986,15 +6105,6 @@ def main() -> None:
                         cfg['unicode_bling'] = LAUNCHER_UNICODE_BLING
                         cfg['progress_bar_style'] = LAUNCHER_PROGRESS_BAR_STYLE
                         cfg['progress_width'] = LAUNCHER_PROGRESS_WIDTH
-                    # エフェクトを編集してから実行（この起動の eff_for_run を更新）
-                    if act == tr("preset_action_effects"):
-                        eff_for_run = effect_menu(eff_for_run, epresets, epath)
-                        # 以降の操作のために、現在の effect_cfg も更新しておく
-                        try:
-                            effect_cfg = dict(eff_for_run)
-                        except Exception as e:
-                            _kana_silent_exc('launcher:L4989', e)
-                            pass
                     # 動画が存在する場合のみ：必要な追加設定を質問（プリセット実行時）
                     if bool(common_defaults.get("video_active", False)) and bool(common_defaults.get("has_videos", False)):
                         # 既定は自動配分（VIDEO_FRAMES_PER_VIDEO=0）
@@ -6153,7 +6263,21 @@ def main() -> None:
 
         print("\n" + tr("run") + "\n")
         try:
-            # 壁紙へ反映するか（連続出力用途などでOFFにできます）
+            # 壁紙へ反映するか（毎回確認）
+            try:
+                wp = ask_choice(
+                    tr("apply_wallpaper_prompt"),
+                    [tr("apply_wallpaper_yes"), tr("apply_wallpaper_no")],
+                    default_index=1 if bool(run_plan.get("apply_wallpaper", True)) else 2,
+                    allow_back=True,
+                )
+                if wp == BACK_TOKEN:
+                    continue
+                run_plan["apply_wallpaper"] = (wp == tr("apply_wallpaper_yes"))
+                last_apply_wallpaper = bool(run_plan.get("apply_wallpaper", True))
+            except Exception as e:
+                _kana_silent_exc('launcher:apply_wallpaper_prompt', e)
+                pass
             try:
                 setattr(mod, "APPLY_WALLPAPER", bool(run_plan.get("apply_wallpaper", True)))
             except Exception:
