@@ -30,11 +30,21 @@
 
 ## サンプル出力
 
-### grid
-<img src="docs/grid.jpg" alt="grid layout sample" width="900">
+### quilt
+<img src="docs/quilt.jpg" alt="quilt sample" width="900">
 
 <details>
 <summary>他のサンプル出力（クリックで表示）</summary>
+
+<p>
+  <b>stained-glass</b><br>
+  <img src="docs/stained-glass.jpg" alt="stained-glass sample" width="900">
+</p>
+
+<p>
+  <b>grid</b><br>
+  <img src="docs/grid.jpg" alt="grid layout sample" width="900">
+</p>
 
 <p>
   <b>hex</b><br>
@@ -49,16 +59,6 @@
 <p>
   <b>mosaic-uniform-width</b><br>
   <img src="docs/mosaic-uniform-width.jpg" alt="mosaic uniform-width sample" width="900">
-</p>
-
-<p>
-  <b>quilt</b><br>
-  <img src="docs/quilt.jpg" alt="quilt sample" width="900">
-</p>
-
-<p>
-  <b>stained-glass</b><br>
-  <img src="docs/stained-glass.jpg" alt="stained-glass sample" width="900">
 </p>
 
 </details>
@@ -309,11 +309,21 @@ If you are unsure, run the **launcher** and answer the prompts.
 
 ## Sample outputs
 
-### grid
-<img src="docs/grid.jpg" alt="grid layout sample" width="900">
+### quilt
+<img src="docs/quilt.jpg" alt="quilt sample" width="900">
 
 <details>
 <summary>More samples (click to expand)</summary>
+
+<p>
+  <b>stained-glass</b><br>
+  <img src="docs/stained-glass.jpg" alt="stained-glass sample" width="900">
+</p>
+
+<p>
+  <b>grid</b><br>
+  <img src="docs/grid.jpg" alt="grid layout sample" width="900">
+</p>
 
 <p>
   <b>hex</b><br>
@@ -329,17 +339,6 @@ If you are unsure, run the **launcher** and answer the prompts.
   <b>mosaic-uniform-width</b><br>
   <img src="docs/mosaic-uniform-width.jpg" alt="mosaic uniform-width sample" width="900">
 </p>
-
-<p>
-  <b>quilt</b><br>
-  <img src="docs/quilt.jpg" alt="quilt sample" width="900">
-</p>
-
-<p>
-  <b>stained-glass</b><br>
-  <img src="docs/stained-glass.jpg" alt="stained-glass sample" width="900">
-</p>
-
 </details>
 
 ---
