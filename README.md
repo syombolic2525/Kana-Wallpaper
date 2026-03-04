@@ -12,22 +12,6 @@
 
 ---
 
-## 目次
-- [サンプル出力](#サンプル出力)
-- [ファイル構成](#ファイル構成)
-- [クイックスタート](#クイックスタート)
-- [主な機能](#主な機能)
-- [必要環境](#必要環境)
-- [インストール](#インストール)
-- [使い方（基本）](#使い方基本)
-- [AI顔検出（任意）](#ai顔検出任意)
-- [動画フレーム抽出（任意）](#動画フレーム抽出任意)
-- [生成されるファイル（画像以外）と保存場所](#生成されるファイル画像以外と保存場所)
-- [利用条件](#利用条件)
-- [更新履歴](#更新履歴)
-
----
-
 ## サンプル出力
 
 ### quilt
@@ -287,23 +271,6 @@ YOLOをGPUで使うには、PyTorchをGPU版で入れる必要があります（
 Kana Wallpaper generates a **single wallpaper image (PNG/JPG)** by selecting many images from **folders / archives / videos (frame extraction)** and arranging them with layouts such as **grid / hex / mosaic (uniform-height, uniform-width) / quilt / stained-glass**.
 
 If you are unsure, run the **launcher** and answer the prompts.
-
----
-
-## Table of contents
-- [Sample outputs](#sample-outputs)
-- [File layout](#file-layout)
-- [Quick start](#quick-start)
-- [One-click GPU setup (Windows recommended)](#one-click-gpu-setup-windows-recommended)
-- [Key features](#key-features)
-- [Requirements](#requirements)
-- [Install](#install)
-- [Usage (basic)](#usage-basic)
-- [AI face detection (optional)](#ai-face-detection-optional)
-- [Video frame extraction (optional)](#video-frame-extraction-optional)
-- [Generated files (non-image) and locations](#generated-files-non-image-and-locations)
-- [Terms](#terms)
-- [Changelog](#changelog)
 
 ---
 
